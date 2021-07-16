@@ -6,9 +6,10 @@ It uses the excellent [Apache Parquet Official Native Rust Implementation](https
 
 ## How to use it
 
-Download the executable for your platform and execute from the command line, e.g.:
+Install from [crates.io](https://crates.io) or download [released executables for your platform](https://github.com/jupiter/parquet2json/releases), and execute from the command line, e.g.:
 
 ```shell
+$ cargo install parquet2json
 $ parquet2json --help
 
 USAGE:

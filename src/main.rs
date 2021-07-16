@@ -47,8 +47,9 @@ fn main() {
             Arg::new("limit")
                 .short('l')
                 .long("limit")
-                .takes_value(true)
-                .about("Maximum number of rows to output"),
+                .value_name("NUMBER")
+                .about("Maximum number of rows to output")
+                .takes_value(true),
         )
         .get_matches();
 
