@@ -1,0 +1,30 @@
+name: Merge
+on:
+  push:
+    branches:
+      - master
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v1
+    - name: Check
+      run: cargo check
+    - name: Test
+      run: cargo test
+    - name: Lint
+      run: cargo clippy --all-targets -- -D warnings
+    - name: Format
+      run: cargo fmt -- --check
+  package:
+    needs: [verify]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v1
+    - name: Login
+      run: cargo login ${{ secrets.CRATE_REGISTRY_PAT }}
+    - name: Publish
+      if: success()
+      run: cargo publish
