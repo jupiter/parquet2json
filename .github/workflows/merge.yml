@@ -2,29 +2,43 @@ name: Merge
 on:
   push:
     branches:
-      - master
+      - main
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout
-      uses: actions/checkout@v1
-    - name: Check
-      run: cargo check
-    - name: Test
-      run: cargo test
-    - name: Lint
-      run: cargo clippy --all-targets -- -D warnings
-    - name: Format
-      run: cargo fmt -- --check
+      - name: Checkout
+        uses: actions/checkout@v1
+      - name: Check
+        run: cargo check
+      - name: Test
+        run: cargo test
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Format
+        run: cargo fmt -- --check
+  executable:
+    needs: [verify]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-18.04, macos-11]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+      - name: Build
+        run: cargo build --release
+      - name: Publish
+        if: success()
+        run: cargo publish
   package:
     needs: [verify]
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout
-      uses: actions/checkout@v1
-    - name: Login
-      run: cargo login ${{ secrets.CRATE_REGISTRY_PAT }}
-    - name: Publish
-      if: success()
-      run: cargo publish
+      - name: Checkout
+        uses: actions/checkout@v1
+      - name: Login
+        run: cargo login ${{ secrets.CRATE_REGISTRY_PAT }}
+      - name: Publish
+        if: success()
+        run: cargo publish
