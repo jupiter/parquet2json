@@ -1,13 +1,24 @@
 use clap::{App, Arg};
-use parquet::file::reader::{FileReader, SerializedFileReader};
+use std::sync::Arc;
+use parquet::file::reader::{FileReader, ChunkReader, SerializedFileReader};
 use std::fs::File;
 use std::path::Path;
+use reqwest::blocking::Client;
+use http_reader::HttpChunkReader;
+mod http_reader;
 
-fn print_json_from(file: String, offset: u32, limit: i32) {
-    let file = File::open(&Path::new(&file)).unwrap();
-    let reader = SerializedFileReader::new(file).unwrap();
+enum Source {
+    File(String),
+    Url(String)
+}
 
-    let iter = reader.get_row_iter(None).unwrap();
+fn output_rows<T: 'static>(reader: T, offset: u32, limit: i32) 
+where 
+    T: ChunkReader
+{
+    let file_reader = SerializedFileReader::new(reader).unwrap();
+    let iter = file_reader.get_row_iter(None).unwrap();
+
     let mut input_rows_count = 0;
     let mut output_rows_count = 0;
     for record in iter {
@@ -23,6 +34,19 @@ fn print_json_from(file: String, offset: u32, limit: i32) {
 
         println!("{}", record.to_json_value());
     }
+}
+
+fn print_json_from(source: Source, offset: u32, limit: i32) {
+    match source {
+        Source::File(path) => {
+            let file = File::open(&Path::new(&path)).unwrap();
+            output_rows(file, offset, limit);
+        }
+        Source::Url(url) => {
+            let reader = HttpChunkReader::new_unknown_size(Arc::new(Client::new()), url);
+            output_rows(reader, offset, limit);
+        }
+    };
 }
 
 fn main() {
@@ -57,5 +81,9 @@ fn main() {
     let limit: i32 = matches.value_of_t("limit").unwrap_or(-1);
     let input: String = matches.value_of_t("INPUT").unwrap_or_else(|e| e.exit());
 
-    print_json_from(input, offset, limit);
+    if input.as_str().starts_with("http") {
+        print_json_from(Source::Url(input), offset, limit);
+    } else {
+        print_json_from(Source::File(input), offset, limit);
+    }
 }
