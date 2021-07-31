@@ -1054,7 +1054,6 @@ dependencies = [
  "async-trait",
  "clap 3.0.0-beta.2",
  "parquet",
- "regex",
  "rusoto_core",
  "rusoto_s3",
  "tokio",
