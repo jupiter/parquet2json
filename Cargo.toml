@@ -1,14 +1,18 @@
 [package]
 name = "parquet2json"
 description = "A command-line tool for converting Parquet to newline-delimited JSON"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2018"
-license = "Apache-2.0"
-authors = ["Pieter Raubenheimer <pieter@wavana.com>"]
+license = "MIT"
+authors = ["Pieter Raubenheimer <pieter@wavana.com>", "rdettai <contact@cloudfuse.io>"]
 repository = "https://github.com/jupiter/parquet2json"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+arrow = { version = "4.3", features = ["prettyprint"] }
+async-trait = "0.1"
 clap = "3.0.0-beta.2"
-parquet = { version = "4.4.0", features = ["cli"] }
+parquet = { version = "4.4", features = ["cli"] }
+rusoto_core = { version = "0.47.0", default_features = false, features=["rustls"] }
+rusoto_s3 = { version = "0.47.0", default_features = false, features=["rustls"] }
+tokio = { version = "1.0" }
+url = { version = "2.2.2" }
