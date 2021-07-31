@@ -1,3 +1,4 @@
+#[allow(clippy::all)]
 use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Read};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -22,9 +23,8 @@ impl Read for CachedRead {
         // compute len to read
         let len = std::cmp::min(buf.len(), self.remaining as usize);
         // get downloaded data
-        buf[0..len].clone_from_slice(
-            &self.data[self.position as usize..(self.position as usize + len)],
-        );
+        buf[0..len]
+            .clone_from_slice(&self.data[self.position as usize..(self.position as usize + len)]);
 
         // update reader position
         self.remaining -= len as u64;
@@ -43,12 +43,7 @@ enum Download {
 /// An "all or nothing" representation of the download.
 #[async_trait]
 pub trait Downloader: Send + Sync {
-    async fn download(
-        &self,
-        file_id: String,
-        start: u64,
-        length: usize,
-    ) -> Result<Vec<u8>>;
+    async fn download(&self, file_id: String, start: u64, length: usize) -> Result<Vec<u8>>;
 }
 
 type DownloaderId = String;
@@ -67,18 +62,18 @@ pub struct RangeCacheStats {
 }
 
 impl RangeCacheStats {
-    pub fn downloaded_bytes(&self) -> usize {
-        self.downloaded_bytes.load(Ordering::Relaxed)
-    }
-    pub fn processed_bytes(&self) -> usize {
-        self.processed_bytes.load(Ordering::Relaxed)
-    }
-    pub fn waiting_download_ms(&self) -> usize {
-        self.waiting_download_ms.load(Ordering::Relaxed)
-    }
-    pub fn download_count(&self) -> usize {
-        self.download_count.load(Ordering::Relaxed)
-    }
+    // pub fn downloaded_bytes(&self) -> usize {
+    //     self.downloaded_bytes.load(Ordering::Relaxed)
+    // }
+    // pub fn processed_bytes(&self) -> usize {
+    //     self.processed_bytes.load(Ordering::Relaxed)
+    // }
+    // pub fn waiting_download_ms(&self) -> usize {
+    //     self.waiting_download_ms.load(Ordering::Relaxed)
+    // }
+    // pub fn download_count(&self) -> usize {
+    //     self.download_count.load(Ordering::Relaxed)
+    // }
 }
 
 /// A caching struct that queues up download requests and executes them with
@@ -154,10 +149,7 @@ impl RangeCache {
                         .or_insert_with(|| BTreeMap::new());
                     match downloaded_res {
                         Ok(downloaded_chunk) => {
-                            file_map.insert(
-                                message.2,
-                                Download::Done(Arc::new(downloaded_chunk)),
-                            );
+                            file_map.insert(message.2, Download::Done(Arc::new(downloaded_chunk)));
                         }
                         Err(err) => {
                             file_map.insert(message.2, Download::Error(err.reason()));
@@ -265,9 +257,9 @@ impl RangeCache {
         }
     }
 
-    pub fn statistics(&self) -> Arc<RangeCacheStats> {
-        Arc::clone(&self.stats)
-    }
+    // pub fn statistics(&self) -> Arc<RangeCacheStats> {
+    //     Arc::clone(&self.stats)
+    // }
 }
 
 #[cfg(test)]
@@ -336,12 +328,7 @@ mod tests {
 
     #[async_trait]
     impl Downloader for MockDownloader {
-        async fn download(
-            &self,
-            _file: String,
-            _start: u64,
-            length: usize,
-        ) -> Result<Vec<u8>> {
+        async fn download(&self, _file: String, _start: u64, length: usize) -> Result<Vec<u8>> {
             tokio::time::sleep(Duration::from_millis(10)).await;
             Ok(pattern(0, length))
         }
@@ -362,8 +349,7 @@ mod tests {
         length: usize,
     ) -> Result<Vec<u8>> {
         tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
-            let mut reader =
-                cache.get(downloader.to_owned(), file.to_owned(), start, length)?;
+            let mut reader = cache.get(downloader.to_owned(), file.to_owned(), start, length)?;
             let mut content = vec![];
             reader.read_to_end(&mut content)?;
             Ok(content)

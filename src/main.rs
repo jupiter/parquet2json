@@ -4,9 +4,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use clap::{App, Arg};
-use parquet::file::reader::{FileReader, Length, ChunkReader, SerializedFileReader};
+use parquet::file::reader::{ChunkReader, FileReader, Length, SerializedFileReader};
 use rusoto_core::Region;
-use rusoto_s3::{ListObjectsV2Request, ListObjectsV2Output, S3Client, S3};
+use rusoto_s3::{ListObjectsV2Output, ListObjectsV2Request, S3Client, S3};
 use url::Url;
 
 mod buzz;
@@ -14,12 +14,12 @@ use buzz::{s3, CachedFile, RangeCache};
 
 enum Source {
     File(String),
-    S3(String)
+    S3(String),
 }
 
-fn output_rows<T: 'static>(reader: T, offset: u32, limit: i32) 
-where 
-    T: ChunkReader
+fn output_rows<T: 'static>(reader: T, offset: u32, limit: i32)
+where
+    T: ChunkReader,
 {
     let file_reader = SerializedFileReader::new(reader).unwrap();
     let iter = file_reader.get_row_iter(None).unwrap();
@@ -47,7 +47,7 @@ async fn print_json_from(source: Source, offset: u32, limit: i32) {
             let file = File::open(&Path::new(&path)).unwrap();
             output_rows(file, offset, limit);
         }
-        Source::S3(url_str) => {            
+        Source::S3(url_str) => {
             let url = Url::parse(&url_str).unwrap();
             let host_str = url.host_str().unwrap();
             let key = &url.path()[1..];
@@ -58,9 +58,7 @@ async fn print_json_from(source: Source, offset: u32, limit: i32) {
                 prefix: Some(String::from(key)),
                 ..Default::default()
             };
-            let list_res: ListObjectsV2Output = s3_client
-                .list_objects_v2(list_req)
-                .await.unwrap();
+            let list_res: ListObjectsV2Output = s3_client.list_objects_v2(list_req).await.unwrap();
             let object_found = &list_res.contents.unwrap()[0];
             let size = object_found.size.unwrap().try_into().unwrap();
 
@@ -68,7 +66,7 @@ async fn print_json_from(source: Source, offset: u32, limit: i32) {
             let (dler_id, dler_creator) = s3::downloader_creator(Region::default().name());
             let file_id = s3::file_id(host_str, key);
             let file = CachedFile::new(file_id, size, Arc::new(cache), dler_id, dler_creator);
-            
+
             file.prefetch(file.len() - size, size as usize);
             output_rows(file, offset, limit);
         }
@@ -107,7 +105,7 @@ async fn main() {
     let offset: u32 = matches.value_of_t("offset").unwrap_or(0);
     let limit: i32 = matches.value_of_t("limit").unwrap_or(-1);
     let file: String = matches.value_of_t("FILE").unwrap_or_else(|e| e.exit());
-    
+
     if file.as_str().starts_with("s3://") {
         print_json_from(Source::S3(file), offset, limit).await;
     } else {

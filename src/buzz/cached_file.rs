@@ -1,8 +1,8 @@
 use std::fmt;
 use std::sync::Arc;
 
-use super::range_cache::{CachedRead, Downloader, RangeCache};
 use super::error::BuzzError;
+use super::range_cache::{CachedRead, Downloader, RangeCache};
 use parquet::errors::{ParquetError, Result as ParquetResult};
 use parquet::file::reader::{ChunkReader, Length};
 
@@ -60,6 +60,12 @@ impl ChunkReader for CachedFile {
     type T = CachedRead;
 
     fn get_read(&self, start: u64, length: usize) -> ParquetResult<Self::T> {
+        // println!("GET_READ {} {} {}", start, length, self.dler_id);
+        // let dler_id = format!("{}-{}-{}", self.dler_id, start, length);
+
+        // self.cache.register_downloader(&dler_id, dler_creator);
+        // self.cache
+        //     .schedule(dler_id.clone(), self.file_id.clone(), start, length);
         self.cache
             .get(self.dler_id.clone(), self.file_id.clone(), start, length)
             .map_err(|e| match e {

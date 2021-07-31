@@ -11,6 +11,8 @@ use parquet::errors::ParquetError;
 /// Result type for operations that could result in an [BuzzError]
 pub type Result<T> = result::Result<T, BuzzError>;
 
+#[allow(clippy::all)]
+
 /// Buzz error
 #[derive(Debug)]
 pub enum BuzzError {
@@ -23,13 +25,13 @@ pub enum BuzzError {
     /// Wraps an error from the DataFusion crate
     // DataFusionError(DataFusionError),
     /// A bad request was sent to Buzz
-    BadRequest(String),
+    // BadRequest(String),
     /// Error associated to I/O operations and associated traits.
     IoError(io::Error),
     /// Error returned on a branch that we know it is possible
     /// but to which we still have no implementation for.
     /// Often, these errors are tracked in our issue tracker.
-    NotImplemented(String),
+    // NotImplemented(String),
     /// Error returned as a consequence of an error in Buzz.
     /// This error should not happen in normal usage of Buzz.
     // BuzzError has internal invariants that we are unable to ask the compiler to check for us.
@@ -37,14 +39,14 @@ pub enum BuzzError {
     Internal(String),
     /// This error happens whenever a plan is not valid. Examples include
     /// impossible casts, schema inference not possible and non-unique column names.
-    Plan(String),
+    // Plan(String),
     /// Error returned during execution of the query.
     /// Examples include files not found, errors in parsing certain types.
-    Execution(String),
+    // Execution(String),
     /// Error returned when hbee failed
-    HBee(String),
+    // HBee(String),
     /// Client error
-    CloudClient(String),
+    // CloudClient(String),
     /// Error when downloading data from an external source
     Download(String),
 }
@@ -89,13 +91,13 @@ macro_rules! ensure {
 
 impl BuzzError {
     /// Wraps this [BuzzError] as an [Arrow::error::ArrowError].
-    pub fn into_arrow_external_error(self) -> ArrowError {
-        ArrowError::from_external_error(Box::new(self))
-    }
+    // pub fn into_arrow_external_error(self) -> ArrowError {
+    //     ArrowError::from_external_error(Box::new(self))
+    // }
 
-    pub fn internal(reason: &'static str) -> Self {
-        return Self::Internal(reason.to_owned());
-    }
+    // pub fn internal(reason: &'static str) -> Self {
+    //     return Self::Internal(reason.to_owned());
+    // }
 
     pub fn reason(&self) -> String {
         match *self {
@@ -103,15 +105,15 @@ impl BuzzError {
             // BuzzError::DeltaTableError(ref desc) => format!("{}", desc),
             BuzzError::ParquetError(ref desc) => format!("{}", desc),
             // BuzzError::DataFusionError(ref desc) => format!("{}", desc),
-            BuzzError::BadRequest(ref desc) => format!("{}", desc),
+            // BuzzError::BadRequest(ref desc) => format!("{}", desc),
             BuzzError::IoError(ref desc) => format!("{}", desc),
-            BuzzError::NotImplemented(ref desc) => format!("{}", desc),
+            // BuzzError::NotImplemented(ref desc) => format!("{}", desc),
             BuzzError::Internal(ref desc) => format!("{}", desc),
-            BuzzError::Plan(ref desc) => format!("{}", desc),
-            BuzzError::Execution(ref desc) => format!("{}", desc),
-            BuzzError::HBee(ref desc) => format!("{}", desc),
+            // BuzzError::Plan(ref desc) => format!("{}", desc),
+            // BuzzError::Execution(ref desc) => format!("{}", desc),
+            // BuzzError::HBee(ref desc) => format!("{}", desc),
             BuzzError::Download(ref desc) => format!("{}", desc),
-            BuzzError::CloudClient(ref desc) => format!("{}", desc),
+            // BuzzError::CloudClient(ref desc) => format!("{}", desc),
         }
     }
 }
@@ -158,30 +160,29 @@ impl Display for BuzzError {
             //     write!(f, "DataFusion error: {}", desc)
             // }
             BuzzError::IoError(ref desc) => write!(f, "IO error: {}", desc),
-            BuzzError::BadRequest(ref desc) => {
-                write!(f, "Invalid request: {}", desc)
-            }
-            BuzzError::NotImplemented(ref desc) => {
-                write!(f, "This feature is not implemented: {}", desc)
-            }
+            // BuzzError::BadRequest(ref desc) => {
+            //     write!(f, "Invalid request: {}", desc)
+            // }
+            // BuzzError::NotImplemented(ref desc) => {
+            //     write!(f, "This feature is not implemented: {}", desc)
+            // }
             BuzzError::Internal(ref desc) => {
                 write!(f, "Internal error: {}", desc)
             }
-            BuzzError::Plan(ref desc) => {
-                write!(f, "Error during planning: {}", desc)
-            }
-            BuzzError::Execution(ref desc) => {
-                write!(f, "Execution error: {}", desc)
-            }
-            BuzzError::HBee(ref desc) => {
-                write!(f, "HBee error: {}", desc)
-            }
+            // BuzzError::Plan(ref desc) => {
+            //     write!(f, "Error during planning: {}", desc)
+            // }
+            // BuzzError::Execution(ref desc) => {
+            //     write!(f, "Execution error: {}", desc)
+            // }
+            // BuzzError::HBee(ref desc) => {
+            //     write!(f, "HBee error: {}", desc)
+            // }
             BuzzError::Download(ref desc) => {
                 write!(f, "Download error: {}", desc)
-            }
-            BuzzError::CloudClient(ref desc) => {
-                write!(f, "Cloud client error: {}", desc)
-            }
+            } // BuzzError::CloudClient(ref desc) => {
+              //     write!(f, "Cloud client error: {}", desc)
+              // }
         }
     }
 }
