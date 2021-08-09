@@ -1,25 +1,25 @@
 #[allow(clippy::all)]
 use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Read};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
-use super::error::{BuzzError, Result};
+use super::error::Result;
 use crate::{ensure, internal_err};
 use async_trait::async_trait;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot::{channel, Receiver};
 
 /// A reader that points to a cached chunk
 /// TODO this cannot read from multiple concatenated chunks
-pub struct CachedRead {
+pub struct CachedReadData {
     data: Arc<Vec<u8>>,
     position: u64,
     remaining: u64,
 }
 
-impl Read for CachedRead {
+impl Read for CachedReadData {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        // println!("read() {} {}", buf.len(), self.remaining);
         // compute len to read
         let len = std::cmp::min(buf.len(), self.remaining as usize);
         // get downloaded data
@@ -30,6 +30,38 @@ impl Read for CachedRead {
         self.remaining -= len as u64;
         self.position += len as u64;
         Ok(len)
+    }
+}
+
+pub struct CachedRead {
+    cached_read_data: Option<CachedReadData>,
+    rx: Receiver<Result<CachedReadData>>,
+}
+
+impl Read for CachedRead {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match &mut self.cached_read_data {
+            None => {
+                loop {
+                    match self.rx.try_recv() {
+                        Ok(download_result) => {
+                            let mut read = download_result.unwrap();
+                            let result = read.read(buf);
+                            self.cached_read_data = Some(read);
+                            return result;
+                        }
+                        Err(_) => {
+                            // println!("{}", e);
+                            continue;
+                        }
+                    }
+                }
+            }
+            Some(read) => {
+                let result = read.read(buf);
+                result
+            }
+        }
     }
 }
 
@@ -54,28 +86,6 @@ type CacheData = Arc<Mutex<HashMap<CacheKey, FileData>>>;
 type DownloaderMap = Arc<Mutex<HashMap<DownloaderId, Arc<dyn Downloader>>>>;
 type DownloadRequest = (DownloaderId, FileId, u64, usize);
 
-pub struct RangeCacheStats {
-    downloaded_bytes: AtomicUsize,
-    processed_bytes: AtomicUsize,
-    waiting_download_ms: AtomicUsize,
-    download_count: AtomicUsize,
-}
-
-impl RangeCacheStats {
-    // pub fn downloaded_bytes(&self) -> usize {
-    //     self.downloaded_bytes.load(Ordering::Relaxed)
-    // }
-    // pub fn processed_bytes(&self) -> usize {
-    //     self.processed_bytes.load(Ordering::Relaxed)
-    // }
-    // pub fn waiting_download_ms(&self) -> usize {
-    //     self.waiting_download_ms.load(Ordering::Relaxed)
-    // }
-    // pub fn download_count(&self) -> usize {
-    //     self.download_count.load(Ordering::Relaxed)
-    // }
-}
-
 /// A caching struct that queues up download requests and executes them with
 /// the appropriate registered donwloader.
 pub struct RangeCache {
@@ -83,36 +93,32 @@ pub struct RangeCache {
     downloaders: DownloaderMap,
     cv: Arc<std::sync::Condvar>,
     tx: UnboundedSender<DownloadRequest>,
-    stats: Arc<RangeCacheStats>,
 }
 
 impl RangeCache {
     /// Spawns a task that will listen for new chunks to download and schedule them for download
-    pub async fn new() -> Self {
+    pub async fn new(concurrent_downloads: usize) -> Self {
         let (tx, rx) = unbounded_channel::<DownloadRequest>();
         let cache = Self {
             data: Arc::new(Mutex::new(HashMap::new())),
             downloaders: Arc::new(Mutex::new(HashMap::new())),
             cv: Arc::new(std::sync::Condvar::new()),
             tx,
-            stats: Arc::new(RangeCacheStats {
-                downloaded_bytes: AtomicUsize::new(0),
-                processed_bytes: AtomicUsize::new(0),
-                waiting_download_ms: AtomicUsize::new(0),
-                download_count: AtomicUsize::new(0),
-            }),
         };
-        cache.start(rx).await;
+        cache.start(rx, concurrent_downloads).await;
         cache
     }
 
-    pub async fn start(&self, mut rx: UnboundedReceiver<DownloadRequest>) {
+    pub async fn start(
+        &self,
+        mut rx: UnboundedReceiver<DownloadRequest>,
+        concurrent_downloads: usize,
+    ) {
         let data_ref = Arc::clone(&self.data);
         let cv_ref = Arc::clone(&self.cv);
         let downloaders_ref = Arc::clone(&self.downloaders);
-        let stats_ref = Arc::clone(&self.stats);
         tokio::spawn(async move {
-            let pool = Arc::new(tokio::sync::Semaphore::new(8));
+            let pool = Arc::new(tokio::sync::Semaphore::new(concurrent_downloads));
             while let Some(message) = rx.recv().await {
                 // obtain a permit, it will be released in the spawned download task
                 let permit = pool.acquire().await.unwrap();
@@ -122,7 +128,6 @@ impl RangeCache {
                 let data_ref = Arc::clone(&data_ref);
                 let cv_ref = Arc::clone(&cv_ref);
                 let pool_ref = Arc::clone(&pool);
-                let stats_ref = Arc::clone(&stats_ref);
                 tokio::spawn(async move {
                     // get ref to donwloader
                     let downloader;
@@ -137,10 +142,7 @@ impl RangeCache {
                     let downloaded_res = downloader
                         .download(message.1.clone(), message.2, message.3)
                         .await;
-                    stats_ref
-                        .downloaded_bytes
-                        .fetch_add(message.3, Ordering::SeqCst);
-                    stats_ref.download_count.fetch_add(1, Ordering::SeqCst);
+
                     pool_ref.add_permits(1);
                     // update the cache data with the result
                     let mut data_guard = data_ref.lock().unwrap();
@@ -201,160 +203,65 @@ impl RangeCache {
         start: u64,
         length: usize,
     ) -> Result<CachedRead> {
-        self.stats
-            .processed_bytes
-            .fetch_add(length, Ordering::SeqCst);
-        let start_time = Instant::now();
         use std::ops::Bound::{Included, Unbounded};
-        let mut data_guard = self.data.lock().unwrap();
-        let identifier = (downloader_id.clone(), file_id.clone());
-        let file_map = data_guard.get(&identifier).ok_or(internal_err!(
-            "No download scheduled for file: (donwloader={},file_id={})",
-            &downloader_id,
-            &file_id,
-        ))?;
 
-        let mut before = file_map.range((Unbounded, Included(start))).next_back();
+        let (tx, rx) = channel::<Result<CachedReadData>>();
+        let data_ref = Arc::clone(&self.data);
+        let cv_ref = Arc::clone(&self.cv);
 
-        while let Some((_, Download::Pending)) = before {
-            // wait for the dl to be finished
-            data_guard = self.cv.wait(data_guard).unwrap();
-            before = data_guard
-                .get(&identifier)
-                .expect("files should not disappear during download")
-                .range((Unbounded, Included(start)))
-                .next_back();
-        }
+        std::thread::spawn(move || {
+            let mut data_guard = data_ref.lock().unwrap();
+            let identifier = (downloader_id.clone(), file_id.clone());
+            let file_map = data_guard.get(&identifier).ok_or(internal_err!(
+                "No download scheduled for file: (donwloader={},file_id={})",
+                &downloader_id,
+                &file_id,
+            ))?;
 
-        let before = before.ok_or(internal_err!(
-            "Download not scheduled: (start={},length={})",
-            start,
-            length,
-        ))?;
+            let mut before = file_map.range((Unbounded, Included(start))).next_back();
 
-        let unused_start = start - before.0;
-
-        self.stats
-            .waiting_download_ms
-            .fetch_add(start_time.elapsed().as_millis() as usize, Ordering::SeqCst);
-
-        match before.1 {
-            Download::Done(bytes) => {
-                ensure!(
-                    bytes.len() >= unused_start as usize + length,
-                    "Download not scheduled (overflow right): (start={},length={})",
-                    start,
-                    length,
-                );
-                Ok(CachedRead {
-                    data: Arc::clone(bytes),
-                    position: unused_start,
-                    remaining: length as u64,
-                })
+            while let Some((_, Download::Pending)) = before {
+                // wait for the dl to be finished
+                data_guard = cv_ref.wait(data_guard).unwrap();
+                before = data_guard
+                    .get(&identifier)
+                    .expect("files should not disappear during download")
+                    .range((Unbounded, Included(start)))
+                    .next_back();
             }
-            Download::Error(err) => Err(BuzzError::Download(err.to_owned())),
-            Download::Pending => unreachable!(),
-        }
-    }
 
-    // pub fn statistics(&self) -> Arc<RangeCacheStats> {
-    //     Arc::clone(&self.stats)
-    // }
-}
+            let before = before.ok_or(internal_err!(
+                "Download not scheduled: (start={},length={})",
+                start,
+                length,
+            ))?;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
+            let unused_start = start - before.0;
 
-    #[tokio::test]
-    async fn test_correct_ranges() {
-        let cache = Arc::new(RangeCache::new().await);
-        cache.register_downloader("dl1", || Arc::new(MockDownloader));
-        cache.schedule("dl1".to_owned(), "file1".to_owned(), 145, 50);
+            let result = match before.1 {
+                Download::Done(bytes) => {
+                    ensure!(
+                        bytes.len() >= unused_start as usize + length,
+                        "Download not scheduled (overflow right): (start={},length={})",
+                        start,
+                        length,
+                    );
 
-        // first read will need to wait (sync) because of MockDownloader delay
-        let content1 = read_from_cache(Arc::clone(&cache), "dl1", "file1", 145, 50).await;
-        assert!(content1.is_ok());
-        assert_eq!(content1.unwrap(), pattern(0, 50));
-
-        // the second read should hit the cache
-        let content2 = read_from_cache(Arc::clone(&cache), "dl1", "file1", 150, 30).await;
-        assert!(content2.is_ok());
-        assert_eq!(content2.unwrap(), pattern(5, 35));
-    }
-
-    #[tokio::test]
-    async fn test_invalid_ranges() {
-        let cache = Arc::new(RangeCache::new().await);
-        cache.register_downloader("dl1", || Arc::new(MockDownloader));
-        cache.schedule("dl1".to_owned(), "file1".to_owned(), 145, 50);
-
-        // read overflows existing chunck to the left
-        let read_res = read_from_cache(Arc::clone(&cache), "dl1", "file1", 140, 50).await;
-        assert!(read_res.is_err());
-
-        // read overflows existing chunck to the right
-        let read_res = read_from_cache(Arc::clone(&cache), "dl1", "file1", 150, 50).await;
-        assert!(read_res.is_err());
-
-        // read from a downloader that is not present
-        let read_res = read_from_cache(Arc::clone(&cache), "dl2", "file1", 145, 50).await;
-        assert!(read_res.is_err());
-
-        // read from a file that is not present
-        let read_res = read_from_cache(Arc::clone(&cache), "dl1", "file2", 145, 50).await;
-        assert!(read_res.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_registers_twice() {
-        let cache = Arc::new(RangeCache::new().await);
-        cache.register_downloader("dl1", || Arc::new(MockDownloader));
-        cache.schedule("dl1".to_owned(), "file1".to_owned(), 145, 50);
-        cache.register_downloader("dl1", || Arc::new(MockDownloader));
-
-        // registering the downloader twice should be a noop
-        let content = read_from_cache(Arc::clone(&cache), "dl1", "file1", 145, 50).await;
-        assert!(content.is_ok());
-        assert_eq!(content.unwrap(), pattern(0, 50));
-    }
-
-    //// Test Fixtures: ////
-
-    /// A downloader that returns a simple pattern (1,2,3...254,255,1,2...)
-    /// Waits for 10ms before returning its result to trigger cache misses
-    struct MockDownloader;
-
-    #[async_trait]
-    impl Downloader for MockDownloader {
-        async fn download(&self, _file: String, _start: u64, length: usize) -> Result<Vec<u8>> {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            Ok(pattern(0, length))
-        }
-    }
-
-    /// The pattern (1,2,3...254,255,1,2...) in the range [start,end[
-    fn pattern(start: usize, end: usize) -> Vec<u8> {
-        (start..end).map(|i| (i % 256) as u8).collect::<Vec<_>>()
-    }
-
-    /// Read the given bytes from the given file in the given cache
-    /// Spawns a new thread to do the read because it is blocking
-    async fn read_from_cache(
-        cache: Arc<RangeCache>,
-        downloader: &'static str,
-        file: &'static str,
-        start: u64,
-        length: usize,
-    ) -> Result<Vec<u8>> {
-        tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
-            let mut reader = cache.get(downloader.to_owned(), file.to_owned(), start, length)?;
-            let mut content = vec![];
-            reader.read_to_end(&mut content)?;
-            Ok(content)
+                    Ok(CachedReadData {
+                        data: Arc::clone(bytes),
+                        position: unused_start,
+                        remaining: length as u64,
+                    })
+                }
+                Download::Error(_) => unreachable!(),
+                Download::Pending => unreachable!(),
+            };
+            let _ = tx.send(result);
+            Ok(())
+        });
+        Ok(CachedRead {
+            cached_read_data: None,
+            rx,
         })
-        .await
-        .unwrap()
     }
 }

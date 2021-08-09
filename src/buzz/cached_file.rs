@@ -12,6 +12,7 @@ pub struct CachedFile {
     file_id: String,
     length: u64,
     cache: Arc<RangeCache>,
+    auto_schedule: bool,
 }
 
 impl fmt::Debug for CachedFile {
@@ -31,6 +32,7 @@ impl CachedFile {
         cache: Arc<RangeCache>,
         dler_id: String,
         dler_creator: F,
+        auto_schedule: bool,
     ) -> Self
     where
         F: Fn() -> Arc<dyn Downloader>,
@@ -41,6 +43,7 @@ impl CachedFile {
             file_id,
             length,
             cache,
+            auto_schedule,
         }
     }
 
@@ -60,12 +63,12 @@ impl ChunkReader for CachedFile {
     type T = CachedRead;
 
     fn get_read(&self, start: u64, length: usize) -> ParquetResult<Self::T> {
-        // println!("GET_READ {} {} {}", start, length, self.dler_id);
-        // let dler_id = format!("{}-{}-{}", self.dler_id, start, length);
+        // println!("get_read() {} {} {}", start, length, self.dler_id);
 
-        // self.cache.register_downloader(&dler_id, dler_creator);
-        // self.cache
-        //     .schedule(dler_id.clone(), self.file_id.clone(), start, length);
+        if self.auto_schedule {
+            self.cache
+                .schedule(self.dler_id.clone(), self.file_id.clone(), start, length);
+        }
         self.cache
             .get(self.dler_id.clone(), self.file_id.clone(), start, length)
             .map_err(|e| match e {

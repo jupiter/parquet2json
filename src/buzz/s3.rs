@@ -18,6 +18,7 @@ struct S3Downloader {
 #[async_trait]
 impl Downloader for S3Downloader {
     async fn download(&self, file_id: String, start: u64, length: usize) -> Result<Vec<u8>> {
+        eprintln!("Downloading {} {} {}", file_id, start, length);
         let mut file_id_split = file_id.split("/");
         let range = format!("bytes={}-{}", start, start + length as u64 - 1);
         let get_obj_req = GetObjectRequest {
@@ -38,6 +39,7 @@ impl Downloader for S3Downloader {
             .read_to_end(&mut res)
             .await
             .map_err(|e| BuzzError::Download(format!("{}", e)))?;
+        eprintln!("Completed {} {} {}", file_id, start, length);
         if bytes_read != length {
             Err(BuzzError::Download(
                 "Not the expected number of bytes".to_owned(),
