@@ -151,7 +151,10 @@ impl RangeCache {
                         .or_insert_with(|| BTreeMap::new());
                     match downloaded_res {
                         Ok(downloaded_chunk) => {
-                            file_map.insert(message.2, Download::Done(Mutex::new(Some(downloaded_chunk))));
+                            file_map.insert(
+                                message.2,
+                                Download::Done(Mutex::new(Some(downloaded_chunk))),
+                            );
                         }
                         Err(err) => {
                             file_map.insert(message.2, Download::Error(err.reason()));

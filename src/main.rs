@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use clap::{App, Arg};
 use parquet::file::reader::{FileReader, Length, SerializedFileReader};
-use parquet::record::reader::{RowIter};
+use parquet::record::reader::RowIter;
 use rusoto_core::Region;
 use rusoto_s3::{ListObjectsV2Output, ListObjectsV2Request, S3Client, S3};
 use url::Url;
@@ -77,7 +77,7 @@ async fn print_json_from(source: Source, offset: u32, limit: i32) {
             let file_reader = SerializedFileReader::new(file).unwrap();
 
             let blocking_task = tokio::task::spawn_blocking(move || {
-                output_rows(file_reader.get_row_iter(None).unwrap(), offset, limit);                         
+                output_rows(file_reader.get_row_iter(None).unwrap(), offset, limit);
             });
             blocking_task.await.unwrap();
         }
