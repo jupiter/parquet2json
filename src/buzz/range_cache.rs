@@ -12,7 +12,7 @@ use tokio::sync::oneshot::{channel, Receiver};
 /// A reader that points to a cached chunk
 /// TODO this cannot read from multiple concatenated chunks
 pub struct CachedReadData {
-    data: Arc<Vec<u8>>,
+    data: Vec<u8>,
     position: u64,
     remaining: u64,
 }
@@ -24,7 +24,7 @@ impl Read for CachedReadData {
         let len = std::cmp::min(buf.len(), self.remaining as usize);
         // get downloaded data
         buf[0..len]
-            .clone_from_slice(&self.data[self.position as usize..(self.position as usize + len)]);
+            .copy_from_slice(&self.data[self.position as usize..(self.position as usize + len)]);
 
         // update reader position
         self.remaining -= len as u64;
@@ -68,7 +68,7 @@ impl Read for CachedRead {
 /// The status and content of the download
 enum Download {
     Pending,
-    Done(Arc<Vec<u8>>),
+    Done(Mutex<Option<Vec<u8>>>),
     Error(String),
 }
 
@@ -151,7 +151,10 @@ impl RangeCache {
                         .or_insert_with(|| BTreeMap::new());
                     match downloaded_res {
                         Ok(downloaded_chunk) => {
-                            file_map.insert(message.2, Download::Done(Arc::new(downloaded_chunk)));
+                            file_map.insert(
+                                message.2,
+                                Download::Done(Mutex::new(Some(downloaded_chunk))),
+                            );
                         }
                         Err(err) => {
                             file_map.insert(message.2, Download::Error(err.reason()));
@@ -239,7 +242,8 @@ impl RangeCache {
             let unused_start = start - before.0;
 
             let result = match before.1 {
-                Download::Done(bytes) => {
+                Download::Done(bytes_lock) => {
+                    let bytes = bytes_lock.lock().unwrap().take().unwrap();
                     ensure!(
                         bytes.len() >= unused_start as usize + length,
                         "Download not scheduled (overflow right): (start={},length={})",
@@ -248,7 +252,7 @@ impl RangeCache {
                     );
 
                     Ok(CachedReadData {
-                        data: Arc::clone(bytes),
+                        data: bytes,
                         position: unused_start,
                         remaining: length as u64,
                     })

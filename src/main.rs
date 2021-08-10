@@ -4,7 +4,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use clap::{App, Arg};
-use parquet::file::reader::{ChunkReader, FileReader, Length, SerializedFileReader};
+use parquet::file::reader::{FileReader, Length, SerializedFileReader};
+use parquet::record::reader::RowIter;
 use rusoto_core::Region;
 use rusoto_s3::{ListObjectsV2Output, ListObjectsV2Request, S3Client, S3};
 use url::Url;
@@ -17,12 +18,7 @@ enum Source {
     S3(String, usize),
 }
 
-fn output_rows<T: 'static>(file_reader: SerializedFileReader<T>, offset: u32, limit: i32)
-where
-    T: ChunkReader,
-{
-    let iter = file_reader.get_row_iter(None).unwrap();
-
+fn output_rows(iter: RowIter, offset: u32, limit: i32) {
     let mut input_rows_count = 0;
     let mut output_rows_count = 0;
     for record in iter {
@@ -45,7 +41,7 @@ async fn print_json_from(source: Source, offset: u32, limit: i32) {
         Source::File(path) => {
             let file = File::open(&Path::new(&path)).unwrap();
             let file_reader = SerializedFileReader::new(file).unwrap();
-            output_rows(file_reader, offset, limit);
+            output_rows(file_reader.get_row_iter(None).unwrap(), offset, limit);
         }
         Source::S3(url_str, concurrency) => {
             let url = Url::parse(&url_str).unwrap();
@@ -81,7 +77,7 @@ async fn print_json_from(source: Source, offset: u32, limit: i32) {
             let file_reader = SerializedFileReader::new(file).unwrap();
 
             let blocking_task = tokio::task::spawn_blocking(move || {
-                output_rows(file_reader, offset, limit);
+                output_rows(file_reader.get_row_iter(None).unwrap(), offset, limit);
             });
             blocking_task.await.unwrap();
         }
