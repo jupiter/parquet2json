@@ -1,7 +1,7 @@
 [package]
 name = "parquet2json"
 description = "A command-line tool for converting Parquet to newline-delimited JSON"
-version = "1.0.3"
+version = "1.1.0"
 edition = "2018"
 license = "MIT"
 authors = ["Pieter Raubenheimer <pieter@wavana.com>", "rdettai <contact@cloudfuse.io>"]
@@ -10,8 +10,12 @@ repository = "https://github.com/jupiter/parquet2json"
 [dependencies]
 arrow = { version = "4.3", features = ["prettyprint"] }
 async-trait = "0.1"
+crossbeam-channel = { version = "0.5.1" }
 clap = "3.0.0-beta.2"
+lazy_static = { version = "1.4.0" }
 parquet = { version = "4.4", features = ["cli"] }
+regex = { version = "1.5.4" }
+reqwest = { version = "0.11", features = ["blocking"] }
 rusoto_core = { version = "0.47.0", default_features = false, features=["rustls"] }
 rusoto_s3 = { version = "0.47.0", default_features = false, features=["rustls"] }
 tokio = { version = "1.0" }
