@@ -10,7 +10,6 @@ repository = "https://github.com/jupiter/parquet2json"
 [dependencies]
 arrow = { version = "4.3", features = ["prettyprint"] }
 async-trait = "0.1"
-bytes = { version = "1.0.1" }
 crossbeam-channel = { version = "0.5.1" }
 clap = "3.0.0-beta.2"
 lazy_static = { version = "1.4.0" }
