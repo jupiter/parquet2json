@@ -11,7 +11,7 @@ use rusoto_s3::{ListObjectsV2Output, ListObjectsV2Request, S3Client, S3};
 use url::Url;
 
 mod http_reader;
-use http_reader::{HttpChunkReader};
+use http_reader::HttpChunkReader;
 mod buzz;
 use buzz::{s3, CachedFile, RangeCache};
 
