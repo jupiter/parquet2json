@@ -10,11 +10,14 @@ use rusoto_core::Region;
 use rusoto_s3::{ListObjectsV2Output, ListObjectsV2Request, S3Client, S3};
 use url::Url;
 
+mod http_reader;
+use http_reader::{HttpChunkReader};
 mod buzz;
 use buzz::{s3, CachedFile, RangeCache};
 
 enum Source {
     File(String),
+    Http(String),
     S3(String, usize),
 }
 
@@ -42,6 +45,16 @@ async fn print_json_from(source: Source, offset: u32, limit: i32) {
             let file = File::open(&Path::new(&path)).unwrap();
             let file_reader = SerializedFileReader::new(file).unwrap();
             output_rows(file_reader.get_row_iter(None).unwrap(), offset, limit);
+        }
+        Source::Http(url_str) => {
+            let mut reader = HttpChunkReader::new_unknown_size(url_str).await;
+            reader.start();
+
+            let blocking_task = tokio::task::spawn_blocking(move || {
+                let file_reader = SerializedFileReader::new(reader).unwrap();
+                output_rows(file_reader.get_row_iter(None).unwrap(), offset, limit);
+            });
+            blocking_task.await.unwrap();
         }
         Source::S3(url_str, concurrency) => {
             let url = Url::parse(&url_str).unwrap();
@@ -128,6 +141,8 @@ async fn main() {
 
     if file.as_str().starts_with("s3://") {
         print_json_from(Source::S3(file, concurrency), offset, limit).await;
+    } else if file.as_str().starts_with("http") {
+        print_json_from(Source::Http(file), offset, limit).await;
     } else {
         print_json_from(Source::File(file), offset, limit).await;
     }

@@ -1,27 +1,27 @@
-use lazy_static::lazy_static;
+use core::panic;
+use std::io::{self, Read};
+use std::result;
 use std::thread;
-use std::sync::Arc;
-use std::io::{self, Cursor, Error, ErrorKind, Read, Seek, SeekFrom, Write};
+
+use lazy_static::lazy_static;
+use crossbeam_channel::{Receiver, Sender, bounded};
 use parquet::errors::{Result};
 use parquet::file::reader::{ChunkReader, Length};
 use reqwest::blocking::{Client, Response};
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use std::ops::Deref;
-use bytes::Bytes;
+use reqwest::header::{HeaderMap, HeaderValue};
 use regex::Regex;
-use bytes::BufMut;
 
 enum Range {
   FromPositionTo(u64, u64),
-  FromEnd(i64)
+  FromEnd(u64)
 }
 
 fn construct_headers(range: Range) -> HeaderMap {
   let mut headers = HeaderMap::new();
 
   let range_str = match range {
-    Range::FromPositionTo(start_pos, end_pos) => format!("bytes={}-{}", start_pos, end_pos),
-    Range::FromEnd(end_pos) => format!("bytes={}", end_pos)
+    Range::FromPositionTo(start_pos, length) => format!("bytes={}-{}", start_pos, length),
+    Range::FromEnd(length) => format!("bytes=-{}", length)
   };
 
   headers.insert("Range", HeaderValue::from_str(range_str.as_str()).unwrap());
@@ -29,85 +29,154 @@ fn construct_headers(range: Range) -> HeaderMap {
 }
 
 struct ContentRange {
-  start_pos: u64,
-  end_pos: u64,
+  // start_pos: u64,
+  // end_pos: u64,
   total_length: u64,
 }
 
+static CONTENT_RANGE_HEADER_KEY: &str = "Content-Range";
+
 fn get_content_range(response: &Response) -> ContentRange {
-  let content_range_value = response.headers().get("Content-Range").unwrap().to_str().unwrap();
+  if !response.headers().contains_key(CONTENT_RANGE_HEADER_KEY) {
+    panic!("Range header not supported");
+  }
+  let content_range_value = response.headers().get(CONTENT_RANGE_HEADER_KEY).unwrap().to_str().unwrap();
   lazy_static! {
     static ref BYTES_REGEX: Regex = Regex::new(
         r"bytes (\d+)-(\d+)/([0-9*]+)"
     ).unwrap();
   };
-  println!("{}", content_range_value);
   let content_range_captures = BYTES_REGEX.captures(content_range_value).unwrap();
   
   ContentRange {
-    start_pos: content_range_captures.get(1).unwrap().as_str().parse::<u64>().unwrap(),
-    end_pos: content_range_captures.get(2).unwrap().as_str().parse::<u64>().unwrap(),
+    // start_pos: content_range_captures.get(1).unwrap().as_str().parse::<u64>().unwrap(),
+    // end_pos: content_range_captures.get(2).unwrap().as_str().parse::<u64>().unwrap(),
     total_length: content_range_captures.get(3).unwrap().as_str().parse::<u64>().unwrap(),
   }
 }
 
-fn fetch_range(client: Arc<Client>, url: String, range: Range) -> Response {
-  // match range {
-  //   Range::FromPositionTo(from, to) => println!("{}-{}", from, to),
-  //   Range::FromEnd(length) => println!("{}", length)
-  // }
-  client.get(url).headers(construct_headers(range)).send().unwrap()
+fn fetch_range(client: Client, url: String, range: Range) -> Response {
+  let response = client.get(url).headers(construct_headers(range)).send().unwrap();
+  response
+}
+
+struct DownloadPart {
+  start_pos: u64,
+  length: u64,
+  reader_channel: Sender<Vec<u8>>
 }
 
 pub struct HttpChunkReader {
-  client: Arc<Client>,
   url: String,
-  start_pos: u64,
-  end_pos: u64,
+  length: u64,
+  read_size: u64,
   total_size: u64,
-  writer: Option<Response>
+  coordinator: Option<Sender<Option<DownloadPart>>>,
+  reader_channel: Option<Receiver<Vec<u8>>>,
+  buf: Vec<u8>
 }
 
 impl HttpChunkReader {
-  pub fn new(client: Arc<Client>, url: String, total_size: u64) -> HttpChunkReader {
+  pub fn new(url: String, total_size: u64) -> HttpChunkReader {
     HttpChunkReader {
-      client,
       url,
-      start_pos: 0,
-      end_pos: 0,
+      length: total_size,
+      read_size: 0,
       total_size,
-      writer: None
+      coordinator: None,
+      reader_channel: None,
+      buf: Vec::new()
     }
   }
 
-  pub fn new_unknown_size(client: Arc<Client>, url: String) -> HttpChunkReader {
-    let response = fetch_range(client.clone(), url.clone(), Range::FromEnd(-4));
-    let content_range = get_content_range(&response);
-    Self::new(client.clone(), url.clone(), content_range.total_length)
+  pub async fn new_unknown_size(url: String) -> HttpChunkReader {
+    tokio::task::spawn_blocking(move || {
+      let response = fetch_range(Client::new(), url.clone(), Range::FromEnd(4));
+      let content_range = get_content_range(&response);
+      let magic_number = response.text().unwrap();
+      if magic_number != "PAR1" {
+        panic!("Not a parquet file");
+      }
+      Self::new(url.clone(), content_range.total_length)
+    }).await.unwrap()
+  }
+
+  pub fn start(&mut self) {
+    let (s, r) = bounded(0);
+    let url = self.url.clone();
+    self.coordinator = Some(s);
+    thread::spawn(move || {
+      loop {
+        match r.recv() {
+          result::Result::Ok(download_part_option) => {
+            let download_part = download_part_option.unwrap();
+            let url = url.clone();
+            thread::spawn(move || {
+              let mut response = fetch_range(Client::new(), url, Range::FromPositionTo(download_part.start_pos, download_part.start_pos + download_part.length -1));
+              loop {
+                let mut data: Vec<u8> = vec![0; 1024 * 64];
+
+                match response.read(&mut data) {
+                  io::Result::Ok(len) => {
+                    let reader_channel = download_part.reader_channel.clone();  
+                    if len == 0 {
+                      return;
+                    }
+                    data.truncate(len);
+                    reader_channel.send(data).unwrap_or_else(|_err| {
+                      // println!("{}", err)
+                    });
+                  },
+                  io::Result::Err(_) => unimplemented!()
+                };
+              }        
+            });
+          },
+          result::Result::Err(_) => {
+            break
+          }
+        }        
+      }
+    });
   }
 }
 
 impl Length for HttpChunkReader {
   fn len(&self) -> u64 {
-      self.total_size
+      self.length
   }
 }
 
 impl Read for HttpChunkReader {
   fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-    println!("Read {}({})", self.start_pos, self.end_pos);
-    match self.writer.take() {
-      Some(mut writer) => {        
-        let result = Read::read(&mut writer, buf);
-        self.writer = Some(writer);
-        result
+    match self.reader_channel.take() {
+      Some(reader_channel) => {
+        let remaining_size = (self.length - self.read_size) as usize;
+        if remaining_size > 0 {
+          let mut data = reader_channel.recv().unwrap();
+          let added_size = data.len();
+          self.read_size += added_size as u64;
+          let has_empty_buffer = self.buf.len() == 0;
+          if has_empty_buffer && buf.len() >= added_size {            
+            buf[0..added_size].copy_from_slice(&data[0..added_size]);
+            self.reader_channel = Some(reader_channel);
+            return Ok(added_size)
+          }
+          if has_empty_buffer {
+            self.buf = data;
+          } else {      
+            self.buf.append(&mut data);
+          }
+        }
+        let readable_size = std::cmp::min(buf.len(), self.buf.len());
+        let drain = self.buf.drain(0..readable_size);
+        let data = drain.as_slice();
+        buf[0..readable_size as usize]
+          .copy_from_slice(&data[0..readable_size]);
+        self.reader_channel = Some(reader_channel);
+        Ok(readable_size)
       },
-      None => {
-        let mut writer = fetch_range(self.client.clone(), self.url.clone(), Range::FromPositionTo(self.start_pos, self.end_pos));
-        let result = Read::read(&mut writer, buf);
-        self.writer = Some(writer);        
-        result
-      }
+      None => unimplemented!()
     }
   }
 }
@@ -116,14 +185,22 @@ impl ChunkReader for HttpChunkReader {
   type T = HttpChunkReader;
 
   fn get_read(&self, start_pos: u64, length: usize) -> Result<Self::T> {
-    println!("New ChunkReader {}({})", start_pos, length);
-    Ok(HttpChunkReader {
-      client: self.client.clone(),
-      url: self.url.clone(),
+    let (s, r) = bounded(0);
+
+    self.coordinator.clone().unwrap().send(Some(DownloadPart {
       start_pos,
-      end_pos: start_pos + (length as u64) - 1,
+      length: length as u64,
+      reader_channel: s
+    })).unwrap();
+
+    Ok(HttpChunkReader {
+      url: self.url.clone(),
+      length: length as u64,
+      read_size: 0,
       total_size: self.total_size,
-      writer: None
+      coordinator: self.coordinator.clone(),
+      reader_channel: Some(r),
+      buf: Vec::new()
     })
   }
 }
