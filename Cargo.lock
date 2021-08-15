@@ -1152,7 +1152,7 @@ dependencies = [
 
 [[package]]
 name = "parquet2json"
-version = "1.0.3"
+version = "1.1.0"
 dependencies = [
  "arrow",
  "async-trait",
