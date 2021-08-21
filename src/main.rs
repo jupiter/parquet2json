@@ -1,19 +1,15 @@
-use std::convert::TryInto;
 use std::fs::File;
 use std::path::Path;
-use std::sync::Arc;
 
 use clap::{App, Arg};
-use parquet::file::reader::{FileReader, Length, SerializedFileReader};
+use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::record::reader::RowIter;
-use rusoto_core::Region;
-use rusoto_s3::{ListObjectsV2Output, ListObjectsV2Request, S3Client, S3};
 use url::Url;
 
 mod http_reader;
 use http_reader::HttpChunkReader;
-mod buzz;
-use buzz::{s3, CachedFile, RangeCache};
+mod s3_reader;
+use s3_reader::S3ChunkReader;
 
 enum Source {
     File(String),
@@ -56,40 +52,17 @@ async fn print_json_from(source: Source, offset: u32, limit: i32) {
             });
             blocking_task.await.unwrap();
         }
-        Source::S3(url_str, concurrency) => {
+        Source::S3(url_str, _concurrency) => {
             let url = Url::parse(&url_str).unwrap();
             let host_str = url.host_str().unwrap();
             let key = &url.path()[1..];
 
-            let s3_client = S3Client::new(Region::default());
-            let list_req = ListObjectsV2Request {
-                bucket: String::from(host_str),
-                prefix: Some(String::from(key)),
-                ..Default::default()
-            };
-            let list_res: ListObjectsV2Output = s3_client.list_objects_v2(list_req).await.unwrap();
-            let object_found = &list_res.contents.unwrap()[0];
-            let size = object_found.size.unwrap().try_into().unwrap();
-
-            let is_parallel = concurrency > 1;
-            let cache = RangeCache::new(concurrency).await;
-            let (dler_id, dler_creator) = s3::downloader_creator(Region::default().name());
-            let file_id = s3::file_id(host_str, key);
-            let file = CachedFile::new(
-                file_id,
-                size,
-                Arc::new(cache),
-                dler_id,
-                dler_creator,
-                is_parallel,
-            );
-
-            let pre_size: u64 = if is_parallel { 1024 * 1024 } else { size - 4 };
-            file.prefetch(file.len() - pre_size, pre_size as usize);
-
-            let file_reader = SerializedFileReader::new(file).unwrap();
+            let mut reader =
+                S3ChunkReader::new_unknown_size((String::from(host_str), String::from(key))).await;
+            reader.start().await;
 
             let blocking_task = tokio::task::spawn_blocking(move || {
+                let file_reader = SerializedFileReader::new(reader).unwrap();
                 output_rows(file_reader.get_row_iter(None).unwrap(), offset, limit);
             });
             blocking_task.await.unwrap();
