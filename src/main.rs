@@ -15,7 +15,7 @@ use s3_reader::S3ChunkReader;
 enum Source {
     File(String),
     Http(String),
-    S3(String, usize),
+    S3(String),
 }
 
 fn output_rows(iter: RowIter, offset: u32, limit: i32) {
@@ -53,7 +53,7 @@ async fn print_json_from(source: Source, offset: u32, limit: i32) {
             });
             blocking_task.await.unwrap();
         }
-        Source::S3(url_str, _concurrency) => {
+        Source::S3(url_str) => {
             let url = Url::parse(&url_str).unwrap();
             let host_str = url.host_str().unwrap();
             let key = &url.path()[1..];
@@ -101,23 +101,14 @@ async fn main() {
                 .about("Maximum number of rows to output")
                 .takes_value(true),
         )
-        .arg(
-            Arg::new("concurrency")
-                .short('c')
-                .long("concurrency")
-                .value_name("NUMBER")
-                .about("Maximum number of concurrent column downloads (S3 only, default: 10)")
-                .takes_value(true),
-        )
         .get_matches();
 
     let offset: u32 = matches.value_of_t("offset").unwrap_or(0);
     let limit: i32 = matches.value_of_t("limit").unwrap_or(-1);
     let file: String = matches.value_of_t("FILE").unwrap_or_else(|e| e.exit());
-    let concurrency: usize = matches.value_of_t("concurrency").unwrap_or(10);
 
     if file.as_str().starts_with("s3://") {
-        print_json_from(Source::S3(file, concurrency), offset, limit).await;
+        print_json_from(Source::S3(file), offset, limit).await;
     } else if file.as_str().starts_with("http") {
         print_json_from(Source::Http(file), offset, limit).await;
     } else {
