@@ -1,8 +1,6 @@
 The MIT License (MIT)
 
-Portions of parquet2json are Copyright (c) 2020 cloudfuse as part of buzz-rust.
-
-All other parts of parquet2json are Copyright (c) 2021 FactoryMethod Limited.
+Copyright (c) 2021 FactoryMethod Limited.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
