@@ -1,13 +1,18 @@
 use core::panic;
 use std::io::{self, Read};
 
-use aws_sdk_s3::output::GetObjectOutput;
+use bytes::buf::Reader;
+use bytes::{Buf, Bytes};
+use chunked_bytes::ChunkedBytes;
 use lazy_static::lazy_static;
+use parquet::data_type::AsBytes;
 use parquet::errors::Result;
 use parquet::file::reader::{ChunkReader, Length};
 use regex::Regex;
 
-use aws_sdk_s3::{Client, Config, Region};
+use rusoto_core::Region;
+use rusoto_s3::{GetObjectOutput, GetObjectRequest, S3Client, S3};
+use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio_stream::StreamExt;
 
@@ -26,7 +31,7 @@ fn get_content_range(response: &GetObjectOutput) -> ContentRange {
     lazy_static! {
         static ref BYTES_REGEX: Regex = Regex::new(r"bytes (\d+)-(\d+)/([0-9*]+)").unwrap();
     };
-    println!("Content Range {}", response.content_length);
+
     let content_range_captures = BYTES_REGEX
         .captures(response.content_range.as_ref().unwrap().as_str())
         .unwrap();
@@ -43,30 +48,28 @@ fn get_content_range(response: &GetObjectOutput) -> ContentRange {
     }
 }
 
-async fn fetch_range(client: Client, url: (String, String), range: Range) -> GetObjectOutput {
+async fn fetch_range(client: S3Client, url: (String, String), range: Range) -> GetObjectOutput {
     let range_str = match range {
         Range::FromPositionTo(start_pos, length) => format!("bytes={}-{}", start_pos, length),
         Range::FromEnd(length) => format!("bytes=-{}", length),
     };
 
-    println!("Fetching {}", range_str);
+    eprintln!("Fetching {}", range_str);
 
-    let result = client
-        .get_object()
-        .bucket(url.0)
-        .key(url.1)
-        .range(range_str)
-        .send()
-        .await
-        .unwrap();
+    let get_obj_req = GetObjectRequest {
+        bucket: url.0,
+        key: url.1,
+        range: Some(range_str),
+        ..Default::default()
+    };
 
-    result
+    client.get_object(get_obj_req).await.unwrap()
 }
 
 struct DownloadPart {
     start_pos: u64,
     length: u64,
-    reader_channel: Sender<Vec<u8>>,
+    reader_channel: Sender<Bytes>,
 }
 
 pub struct S3ChunkReader {
@@ -75,8 +78,8 @@ pub struct S3ChunkReader {
     read_size: u64,
     total_size: u64,
     coordinator: Option<Sender<Option<DownloadPart>>>,
-    reader_channel: Option<Receiver<Vec<u8>>>,
-    buf: Vec<u8>,
+    reader_channel: Option<Receiver<Bytes>>,
+    buf: Reader<ChunkedBytes>,
 }
 
 impl S3ChunkReader {
@@ -88,18 +91,23 @@ impl S3ChunkReader {
             total_size,
             coordinator: None,
             reader_channel: None,
-            buf: Vec::new(),
+            buf: ChunkedBytes::new().reader(),
         }
     }
 
     pub async fn new_unknown_size(url: (String, String)) -> S3ChunkReader {
-        let conf = Config::builder().region(Region::new("us-east-1")).build();
-        let client = Client::from_conf(conf);
-
+        let client = S3Client::new(Region::UsEast1);
         let response = fetch_range(client, url.clone(), Range::FromEnd(4)).await;
         let content_range = get_content_range(&response);
-        let magic_number = response.body.collect().await.unwrap().into_bytes().to_vec();
-        if magic_number != "PAR1".as_bytes() {
+        let mut magic_number: Vec<u8> = vec![];
+        response
+            .body
+            .unwrap()
+            .into_async_read()
+            .read_to_end(&mut magic_number)
+            .await
+            .unwrap();
+        if magic_number.as_bytes() != "PAR1".as_bytes() {
             panic!("Not a parquet file");
         }
         Self::new(url, content_range.total_length)
@@ -112,11 +120,18 @@ impl S3ChunkReader {
         tokio::spawn(async move {
             while let Some(download_part) = r.recv().await.unwrap_or(None) {
                 let url = url.clone();
+                eprintln!(
+                    "Starting {} {}",
+                    download_part.start_pos, download_part.length
+                );
                 tokio::spawn(async move {
-                    let conf = Config::builder().region(Region::new("us-east-1")).build();
-                    let client = Client::from_conf(conf);
+                    let client = S3Client::new(Region::UsEast1);
 
-                    let mut response = fetch_range(
+                    eprintln!(
+                        "Getting {} {}",
+                        download_part.start_pos, download_part.length
+                    );
+                    let response = fetch_range(
                         client,
                         url,
                         Range::FromPositionTo(
@@ -126,11 +141,16 @@ impl S3ChunkReader {
                     )
                     .await;
 
-                    while let Some(bytes) = response.body.try_next().await.unwrap_or(None) {
-                        let mut data = bytes.to_vec();
-                        data.truncate(data.len());
+                    eprintln!(
+                        "Responding {} {}",
+                        download_part.start_pos, download_part.length
+                    );
+
+                    let mut body = response.body.unwrap();
+
+                    while let Ok(Some(data)) = body.try_next().await {
                         let reader_channel = download_part.reader_channel.clone();
-                        reader_channel.send(data.to_vec()).await.unwrap_or(());
+                        reader_channel.send(data).await.unwrap_or(());
                     }
                 });
             }
@@ -146,33 +166,32 @@ impl Length for S3ChunkReader {
 
 impl Read for S3ChunkReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match self.reader_channel.take() {
-            Some(mut reader_channel) => {
-                let remaining_size = (self.length - self.read_size) as usize;
-                if remaining_size > 0 {
-                    let mut data = reader_channel.blocking_recv().unwrap();
+        eprintln!("Reading {} of {}", buf.len(), self.length);
+        let remaining_size = (self.length - self.read_size) as usize;
+        if remaining_size > 0 {
+            match self.reader_channel.take() {
+                Some(mut reader_channel) => {
+                    let self_buf = self.buf.get_mut();
+                    eprintln!(
+                        "Will take from channel {} of {}",
+                        self_buf.remaining(),
+                        self.length
+                    );
+                    let data = reader_channel.blocking_recv().unwrap();
                     let added_size = data.len();
                     self.read_size += added_size as u64;
-                    if self.buf.is_empty() && buf.len() >= added_size {
-                        buf[0..added_size].copy_from_slice(&data[0..added_size]);
+                    if self_buf.is_empty() && buf.len() >= added_size {
+                        buf[0..added_size].copy_from_slice(&data);
                         self.reader_channel = Some(reader_channel);
                         return Ok(added_size);
                     }
-                    if self.buf.is_empty() {
-                        self.buf = data;
-                    } else {
-                        self.buf.append(&mut data);
-                    }
+                    self_buf.put_bytes(data);
+                    self.reader_channel = Some(reader_channel);
                 }
-                let readable_size = std::cmp::min(buf.len(), self.buf.len());
-                let drain = self.buf.drain(0..readable_size);
-                let data = drain.as_slice();
-                buf[0..readable_size as usize].copy_from_slice(&data[0..readable_size]);
-                self.reader_channel = Some(reader_channel);
-                Ok(readable_size)
-            }
-            None => unimplemented!(),
+                None => unimplemented!(),
+            };
         }
+        self.buf.read(buf)
     }
 }
 
@@ -191,7 +210,7 @@ impl ChunkReader for S3ChunkReader {
                 reader_channel: s,
             }))
             .unwrap_or_else(|err| {
-                println!("Error {}", err);
+                eprintln!("Error {}", err);
                 unimplemented!()
             });
 
@@ -202,7 +221,7 @@ impl ChunkReader for S3ChunkReader {
             total_size: self.total_size,
             coordinator: self.coordinator.clone(),
             reader_channel: Some(r),
-            buf: Vec::new(),
+            buf: ChunkedBytes::new().reader(),
         })
     }
 }
