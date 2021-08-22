@@ -4,6 +4,7 @@ use std::path::Path;
 use clap::{App, Arg};
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::record::reader::RowIter;
+use rusoto_core::Region;
 use url::Url;
 
 mod http_reader;
@@ -57,9 +58,12 @@ async fn print_json_from(source: Source, offset: u32, limit: i32) {
             let host_str = url.host_str().unwrap();
             let key = &url.path()[1..];
 
-            let mut reader =
-                S3ChunkReader::new_unknown_size((String::from(host_str), String::from(key))).await;
-            reader.start().await;
+            let mut reader = S3ChunkReader::new_unknown_size(
+                (String::from(host_str), String::from(key)),
+                Region::default(),
+            )
+            .await;
+            reader.start(Region::default()).await;
 
             let blocking_task = tokio::task::spawn_blocking(move || {
                 let file_reader = SerializedFileReader::new(reader).unwrap();

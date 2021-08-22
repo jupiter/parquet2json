@@ -164,7 +164,6 @@ impl Read for HttpChunkReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self.reader_channel.take() {
             Some(reader_channel) => {
-                eprintln!("Reading {} of {}", buf.len(), self.length);
                 let remaining_size = (self.length - self.read_size) as usize;
                 if remaining_size > 0 {
                     let mut data = reader_channel.recv().unwrap();

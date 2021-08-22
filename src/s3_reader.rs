@@ -9,7 +9,6 @@ use parquet::data_type::AsBytes;
 use parquet::errors::Result;
 use parquet::file::reader::{ChunkReader, Length};
 use regex::Regex;
-
 use rusoto_core::Region;
 use rusoto_s3::{GetObjectOutput, GetObjectRequest, S3Client, S3};
 use tokio::io::AsyncReadExt;
@@ -54,8 +53,6 @@ async fn fetch_range(client: S3Client, url: (String, String), range: Range) -> G
         Range::FromEnd(length) => format!("bytes=-{}", length),
     };
 
-    eprintln!("Fetching {}", range_str);
-
     let get_obj_req = GetObjectRequest {
         bucket: url.0,
         key: url.1,
@@ -95,9 +92,9 @@ impl S3ChunkReader {
         }
     }
 
-    pub async fn new_unknown_size(url: (String, String)) -> S3ChunkReader {
-        let client = S3Client::new(Region::UsEast1);
-        let response = fetch_range(client, url.clone(), Range::FromEnd(4)).await;
+    pub async fn new_unknown_size(url: (String, String), region: Region) -> S3ChunkReader {
+        let client = S3Client::new(region);
+        let response = fetch_range(client.clone(), url.clone(), Range::FromEnd(4)).await;
         let content_range = get_content_range(&response);
         let mut magic_number: Vec<u8> = vec![];
         response
@@ -113,24 +110,15 @@ impl S3ChunkReader {
         Self::new(url, content_range.total_length)
     }
 
-    pub async fn start(&mut self) {
+    pub async fn start(&mut self, region: Region) {
         let (s, mut r) = channel(1);
         let url = self.url.clone();
         self.coordinator = Some(s);
         tokio::spawn(async move {
             while let Some(download_part) = r.recv().await.unwrap_or(None) {
+                let client = S3Client::new(region.clone());
                 let url = url.clone();
-                eprintln!(
-                    "Starting {} {}",
-                    download_part.start_pos, download_part.length
-                );
                 tokio::spawn(async move {
-                    let client = S3Client::new(Region::UsEast1);
-
-                    eprintln!(
-                        "Getting {} {}",
-                        download_part.start_pos, download_part.length
-                    );
                     let response = fetch_range(
                         client,
                         url,
@@ -140,11 +128,6 @@ impl S3ChunkReader {
                         ),
                     )
                     .await;
-
-                    eprintln!(
-                        "Responding {} {}",
-                        download_part.start_pos, download_part.length
-                    );
 
                     let mut body = response.body.unwrap();
 
@@ -166,17 +149,11 @@ impl Length for S3ChunkReader {
 
 impl Read for S3ChunkReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        eprintln!("Reading {} of {}", buf.len(), self.length);
         let remaining_size = (self.length - self.read_size) as usize;
         if remaining_size > 0 {
             match self.reader_channel.take() {
                 Some(mut reader_channel) => {
                     let self_buf = self.buf.get_mut();
-                    eprintln!(
-                        "Will take from channel {} of {}",
-                        self_buf.remaining(),
-                        self.length
-                    );
                     let data = reader_channel.blocking_recv().unwrap();
                     let added_size = data.len();
                     self.read_size += added_size as u64;
@@ -199,7 +176,7 @@ impl ChunkReader for S3ChunkReader {
     type T = S3ChunkReader;
 
     fn get_read(&self, start_pos: u64, length: usize) -> Result<Self::T> {
-        let (s, r) = channel(1);
+        let (s, r) = channel(16);
 
         self.coordinator
             .clone()
