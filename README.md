@@ -2,7 +2,7 @@
 
 A command-line tool for converting [Parquet](https://parquet.apache.org) to [newline-delimited JSON](https://en.wikipedia.org/wiki/JSON_streaming#Line-delimited_JSON).
 
-It uses the excellent [Apache Parquet Official Native Rust Implementation](https://github.com/apache/arrow-rs/tree/master/parquet). Direct from S3 download support is provided by extracts from [Buzz Rust](https://github.com/cloudfuse-io/buzz-rust).
+It uses the excellent [Apache Parquet Official Native Rust Implementation](https://github.com/apache/arrow-rs/tree/master/parquet).
 
 ## How to use it
 
@@ -58,8 +58,6 @@ $ parquet2json s3://amazon-reviews-pds/parquet/product_category=Gift_Card/part-0
 ```shell
 $ parquet2json https://amazon-reviews-pds.s3.us-east-1.amazonaws.com/parquet/product_category%3DGift_Card/part-00000-495c48e6-96d6-4650-aa65-3c36a3516ddd.c000.snappy.parquet
 ```
-
-Note: HTTP should be much faster and have a lower memory footprint due to the current implementation of the S3 Reader.
 
 ## License
 
