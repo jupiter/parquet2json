@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::path::Path;
 
-use clap::{App, Arg};
+use clap::{value_t, App, Arg};
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::record::reader::RowIter;
 use rusoto_core::Region;
@@ -77,35 +77,35 @@ async fn print_json_from(source: Source, offset: u32, limit: i32) {
 #[tokio::main]
 async fn main() {
     let matches = App::new("parquet2json")
-        .version("1.1.0")
+        .version("1.2.1")
         .about("Outputs Parquet as JSON")
         .arg(
-            Arg::new("FILE")
-                .about("Location of Parquet input file (path, HTTP or S3 URL)")
+            Arg::with_name("FILE")
+                .help("Location of Parquet input file (path, HTTP or S3 URL)")
                 .required(true)
                 .index(1),
         )
         .arg(
-            Arg::new("offset")
-                .short('o')
+            Arg::with_name("offset")
+                .short(String::from('o'))
                 .long("offset")
                 .value_name("NUMBER")
-                .about("Starts outputting from this row")
+                .help("Starts outputting from this row")
                 .takes_value(true),
         )
         .arg(
-            Arg::new("limit")
-                .short('l')
+            Arg::with_name("limit")
+                .short(String::from('l'))
                 .long("limit")
                 .value_name("NUMBER")
-                .about("Maximum number of rows to output")
+                .help("Maximum number of rows to output")
                 .takes_value(true),
         )
         .get_matches();
 
-    let offset: u32 = matches.value_of_t("offset").unwrap_or(0);
-    let limit: i32 = matches.value_of_t("limit").unwrap_or(-1);
-    let file: String = matches.value_of_t("FILE").unwrap_or_else(|e| e.exit());
+    let offset: u32 = value_t!(matches, "offset", u32).unwrap_or(0);
+    let limit: i32 = value_t!(matches, "limit", i32).unwrap_or(-1);
+    let file: String = value_t!(matches, "FILE", String).unwrap_or_else(|e| e.exit());
 
     if file.as_str().starts_with("s3://") {
         print_json_from(Source::S3(file), offset, limit).await;
