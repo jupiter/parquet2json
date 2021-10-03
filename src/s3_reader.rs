@@ -150,10 +150,10 @@ impl Length for S3ChunkReader {
 impl Read for S3ChunkReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let remaining_size = (self.length - self.read_size) as usize;
-        if remaining_size > 0 {
+        let self_buf = self.buf.get_mut();
+        if remaining_size > 0 && buf.len() > self_buf.remaining() {
             match self.reader_channel.take() {
                 Some(mut reader_channel) => {
-                    let self_buf = self.buf.get_mut();
                     let data = reader_channel.blocking_recv().unwrap();
                     let added_size = data.len();
                     self.read_size += added_size as u64;
