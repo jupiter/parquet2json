@@ -11,9 +11,9 @@ repository = "https://github.com/jupiter/parquet2json"
 bytes = { version = "1.0.1" }
 chunked-bytes = { version = "0.3.0" }
 crossbeam-channel = { version = "0.5.1" }
-clap = "2.33.3"
+clap = "2.34.0"
 lazy_static = { version = "1.4.0" }
-parquet = { version = "5.2.0", features = ["cli"] }
+parquet = { version = "6.5.0", features = ["cli"] }
 regex = { version = "1.5.4" }
 reqwest = { version = "0.11", features = ["blocking"] }
 rusoto_core = { version = "0.47.0", default_features = false, features=["rustls"] }
