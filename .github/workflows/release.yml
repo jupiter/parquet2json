@@ -68,19 +68,10 @@ jobs:
             ~/.cargo/git
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: beta
-          override: true
-          profile: minimal
-          target: ${{ matrix.target }}
-
       - name: Build
         uses: actions-rs/cargo@v1
-        # TODO: Remove this once it's the default
         env:
-          SDKROOT: /Library/Developer/CommandLineTools/SDKs/MacOSX11.1.sdk
+          SDKROOT: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
         with:
           command: build
           args: --release --target ${{ matrix.target }}
