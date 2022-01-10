@@ -1,12 +1,11 @@
-name: Release Binaries
-
+name: Deploy
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*"
 
 jobs:
-  # adapted from https://github.com/starship/starship/blob/master/.github/workflows/deploy.yml
-
+  # Build sources for every OS
   github_build:
     name: Build release binaries
     strategy:
@@ -34,11 +33,11 @@ jobs:
             name: parquet2json-arm-unknown-linux-musleabihf.tar.gz
 
           - target: x86_64-apple-darwin
-            os: macOS-latest
+            os: macOS-11
             name: parquet2json-x86_64-apple-darwin.tar.gz
 
           - target: aarch64-apple-darwin
-            os: macOS-latest
+            os: macOS-11
             name: parquet2json-aarch64-apple-darwin.tar.gz
 
           - target: x86_64-pc-windows-msvc
@@ -53,50 +52,100 @@ jobs:
             os: windows-latest
             name: parquet2json-aarch64-pc-windows-msvc.zip
 
+          - target: x86_64-unknown-freebsd
+            os: ubuntu-latest
+            name: parquet2json-x86_64-unknown-freebsd.tar.gz
+
     runs-on: ${{ matrix.os }}
     continue-on-error: true
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
+      - name: Setup | Checkout
+        uses: actions/checkout@v2.4.0
 
       # Cache files between builds
-      - name: Cache Cargo
-        uses: actions/cache@v2
+      - name: Setup | Cache Cargo
+        uses: actions/cache@v2.1.7
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build
-        uses: actions-rs/cargo@v1
-        env:
-          SDKROOT: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+      - name: Setup | Rust
+        uses: actions-rs/toolchain@v1.0.7
+        with:
+          toolchain: stable
+          override: true
+          profile: minimal
+          target: ${{ matrix.target }}
+
+      - name: Build | Build
+        uses: actions-rs/cargo@v1.0.3
         with:
           command: build
-          args: --release --target ${{ matrix.target }}
+          args: --release --locked --target ${{ matrix.target }}
           use-cross: ${{ matrix.os == 'ubuntu-latest' }}
 
-      - name: Prepare artifacts [Windows]
+      - name: Post Build | Prepare artifacts [Windows]
         if: matrix.os == 'windows-latest'
         run: |
           cd target/${{ matrix.target }}/release
           strip parquet2json.exe
           7z a ../../../${{ matrix.name }} parquet2json.exe
           cd -
-      - name: Prepare artifacts [-nix]
+
+      - name: Post Build | Prepare artifacts [-nix]
         if: matrix.os != 'windows-latest'
         run: |
           cd target/${{ matrix.target }}/release
+          # TODO: investigate better cross platform stripping
           strip parquet2json || true
           tar czvf ../../../${{ matrix.name }} parquet2json
           cd -
-      - name: Upload binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy | Upload artifacts
+        uses: actions/upload-artifact@v2
         with:
-          asset_name: ${{ matrix.name }}
-          asset_path: ${{ matrix.name }}
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_content_type: application/octet-stream
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+
+  # Create GitHub release with Rust build targets and release notes
+  github_release:
+    name: Create GitHub Release
+    needs: github_build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup | Checkout
+        uses: actions/checkout@v2.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup | Artifacts
+        uses: actions/download-artifact@v2
+
+      - name: Setup | Checksums
+        run: for file in parquet2json-*/parquet2json-*; do openssl dgst -sha256 -r "$file" | awk '{print $1}' > "${file}.sha256"; done
+
+      - name: Build | Publish
+        uses: softprops/action-gh-release@v1
+        with:
+          files: parquet2json-*/parquet2json-*
+
+  # Publish parquet2json to Crates.io
+  cargo_publish:
+    name: Publish Cargo Package
+    runs-on: ubuntu-latest
+    needs: github_release
+    steps:
+      - name: Setup | Checkout
+        uses: actions/checkout@v2.4.0
+
+      - name: Setup | Rust
+        uses: actions-rs/toolchain@v1.0.7
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Build | Publish
+        run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
