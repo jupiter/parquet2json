@@ -15,16 +15,17 @@ $ parquet2json --help
 USAGE:
     parquet2json [OPTIONS] <FILE>
 
-ARGS:
-    <FILE>    Location of Parquet input file (path, HTTP or S3 URL)
-
 FLAGS:
     -h, --help       Prints help information
     -V, --version    Prints version information
 
 OPTIONS:
-    -l, --limit <NUMBER>     Maximum number of rows to output
-    -o, --offset <NUMBER>    Starts outputting from this row
+    -l, --limit <NUMBER>                    Maximum number of rows to output
+    -o, --offset <NUMBER>                   Starts outputting from this row
+    -t, --output_thrift_schema <BOOLEAN>    Outputs thrift schema
+
+ARGS:
+    <FILE>    Location of Parquet input file (path, HTTP or S3 URL)
 ```
 
 ### S3 Settings
