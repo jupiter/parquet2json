@@ -41,7 +41,7 @@ fn output_thrift_schema<R: 'static + ChunkReader>(file_reader: &SerializedFileRe
     let parquet_metadata = file_reader.metadata();
     print_schema(
         &mut std::io::stdout(),
-        &parquet_metadata.file_metadata().schema(),
+        parquet_metadata.file_metadata().schema(),
     );
 }
 
