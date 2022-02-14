@@ -2,8 +2,9 @@ use std::fs::File;
 use std::path::Path;
 
 use clap::{value_t, App, Arg};
-use parquet::file::reader::{FileReader, SerializedFileReader};
+use parquet::file::reader::{ChunkReader, FileReader, SerializedFileReader};
 use parquet::record::reader::RowIter;
+use parquet::schema::printer::print_schema;
 use rusoto_core::Region;
 use url::Url;
 
@@ -36,12 +37,25 @@ fn output_rows(iter: RowIter, offset: u32, limit: i32) {
     }
 }
 
-async fn print_json_from(source: Source, offset: u32, limit: i32) {
+fn output_thrift_schema<R: 'static + ChunkReader>(file_reader: &SerializedFileReader<R>) {
+    let parquet_metadata = file_reader.metadata();
+    print_schema(
+        &mut std::io::stdout(),
+        parquet_metadata.file_metadata().schema(),
+    );
+}
+
+async fn print_json_from(source: Source, offset: u32, limit: i32, should_output_schema: bool) {
     match source {
         Source::File(path) => {
             let file = File::open(&Path::new(&path)).unwrap();
             let file_reader = SerializedFileReader::new(file).unwrap();
-            output_rows(file_reader.get_row_iter(None).unwrap(), offset, limit);
+
+            if should_output_schema {
+                output_thrift_schema(&file_reader);
+            } else {
+                output_rows(file_reader.get_row_iter(None).unwrap(), offset, limit);
+            }
         }
         Source::Http(url_str) => {
             let mut reader = HttpChunkReader::new_unknown_size(url_str).await;
@@ -49,7 +63,12 @@ async fn print_json_from(source: Source, offset: u32, limit: i32) {
 
             let blocking_task = tokio::task::spawn_blocking(move || {
                 let file_reader = SerializedFileReader::new(reader).unwrap();
-                output_rows(file_reader.get_row_iter(None).unwrap(), offset, limit);
+
+                if should_output_schema {
+                    output_thrift_schema(&file_reader);
+                } else {
+                    output_rows(file_reader.get_row_iter(None).unwrap(), offset, limit);
+                }
             });
             blocking_task.await.unwrap();
         }
@@ -67,7 +86,12 @@ async fn print_json_from(source: Source, offset: u32, limit: i32) {
 
             let blocking_task = tokio::task::spawn_blocking(move || {
                 let file_reader = SerializedFileReader::new(reader).unwrap();
-                output_rows(file_reader.get_row_iter(None).unwrap(), offset, limit);
+
+                if should_output_schema {
+                    output_thrift_schema(&file_reader);
+                } else {
+                    output_rows(file_reader.get_row_iter(None).unwrap(), offset, limit);
+                }
             });
             blocking_task.await.unwrap();
         }
@@ -84,6 +108,14 @@ async fn main() {
                 .help("Location of Parquet input file (path, HTTP or S3 URL)")
                 .required(true)
                 .index(1),
+        )
+        .arg(
+            Arg::with_name("output_thrift_schema")
+                .short(String::from("t"))
+                .long("output_thrift_schema")
+                .value_name("BOOLEAN")
+                .help("Outputs thrift schema first")
+                .takes_value(true),
         )
         .arg(
             Arg::with_name("offset")
@@ -103,15 +135,17 @@ async fn main() {
         )
         .get_matches();
 
+    let output_thrift_schema: bool =
+        value_t!(matches, "output_thrift_schema", bool).unwrap_or(false);
     let offset: u32 = value_t!(matches, "offset", u32).unwrap_or(0);
     let limit: i32 = value_t!(matches, "limit", i32).unwrap_or(-1);
     let file: String = value_t!(matches, "FILE", String).unwrap_or_else(|e| e.exit());
 
     if file.as_str().starts_with("s3://") {
-        print_json_from(Source::S3(file), offset, limit).await;
+        print_json_from(Source::S3(file), offset, limit, output_thrift_schema).await;
     } else if file.as_str().starts_with("http") {
-        print_json_from(Source::Http(file), offset, limit).await;
+        print_json_from(Source::Http(file), offset, limit, output_thrift_schema).await;
     } else {
-        print_json_from(Source::File(file), offset, limit).await;
+        print_json_from(Source::File(file), offset, limit, output_thrift_schema).await;
     }
 }
