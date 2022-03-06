@@ -111,7 +111,7 @@ impl S3ChunkReader {
         Self::new(url, content_range.total_length)
     }
 
-    pub async fn start(&mut self, region: Region) {
+    pub async fn start(&mut self, region: Region, timeout: Duration) {
         let (s, mut r) = channel(1);
         let url = self.url.clone();
         self.coordinator = Some(s);
@@ -130,7 +130,7 @@ impl S3ChunkReader {
                     )
                     .await;
 
-                    let body = response.body.unwrap().timeout(Duration::from_secs(60));
+                    let body = response.body.unwrap().timeout(timeout);
                     tokio::pin!(body);
 
                     while let Ok(Some(data)) = body.try_next().await {

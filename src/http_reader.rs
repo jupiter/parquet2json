@@ -1,4 +1,5 @@
 use core::panic;
+use core::time::Duration;
 use std::io::{self, Read};
 use std::result;
 use std::thread;
@@ -114,7 +115,7 @@ impl HttpChunkReader {
         .unwrap()
     }
 
-    pub fn start(&mut self) {
+    pub fn start(&mut self, timeout: Duration) {
         let (s, r) = bounded(0);
         let url = self.url.clone();
         self.coordinator = Some(s);
@@ -123,8 +124,9 @@ impl HttpChunkReader {
                 let download_part = download_part_option.unwrap();
                 let url = url.clone();
                 thread::spawn(move || {
+                    let client = Client::builder().timeout(timeout).build().unwrap();
                     let mut response = fetch_range(
-                        Client::new(),
+                        client,
                         url,
                         Range::FromPositionTo(
                             download_part.start_pos,
@@ -141,9 +143,7 @@ impl HttpChunkReader {
                                     return;
                                 }
                                 data.truncate(len);
-                                reader_channel.send(data).unwrap_or_else(|_err| {
-                                    // println!("{}", err)
-                                });
+                                reader_channel.send(data).unwrap();
                             }
                             io::Result::Err(_) => unimplemented!(),
                         };
