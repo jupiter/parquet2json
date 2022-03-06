@@ -1,4 +1,5 @@
 use core::panic;
+use core::time::Duration;
 use std::io::{self, Read};
 
 use bytes::buf::Reader;
@@ -110,7 +111,7 @@ impl S3ChunkReader {
         Self::new(url, content_range.total_length)
     }
 
-    pub async fn start(&mut self, region: Region) {
+    pub async fn start(&mut self, region: Region, timeout: Duration) {
         let (s, mut r) = channel(1);
         let url = self.url.clone();
         self.coordinator = Some(s);
@@ -129,11 +130,12 @@ impl S3ChunkReader {
                     )
                     .await;
 
-                    let mut body = response.body.unwrap();
+                    let body = response.body.unwrap().timeout(timeout);
+                    tokio::pin!(body);
 
                     while let Ok(Some(data)) = body.try_next().await {
                         let reader_channel = download_part.reader_channel.clone();
-                        reader_channel.send(data).await.unwrap_or(());
+                        reader_channel.send(data.unwrap()).await.unwrap_or(());
                     }
                 });
             }

@@ -1,3 +1,4 @@
+use core::time::Duration;
 use std::fs::File;
 use std::path::Path;
 
@@ -45,7 +46,13 @@ fn output_thrift_schema<R: 'static + ChunkReader>(file_reader: &SerializedFileRe
     );
 }
 
-async fn print_json_from(source: Source, offset: u32, limit: i32, should_output_schema: bool) {
+async fn print_json_from(
+    source: Source,
+    offset: u32,
+    limit: i32,
+    should_output_schema: bool,
+    timeout: Duration,
+) {
     match source {
         Source::File(path) => {
             let file = File::open(&Path::new(&path)).unwrap();
@@ -59,7 +66,7 @@ async fn print_json_from(source: Source, offset: u32, limit: i32, should_output_
         }
         Source::Http(url_str) => {
             let mut reader = HttpChunkReader::new_unknown_size(url_str).await;
-            reader.start();
+            reader.start(timeout);
 
             let blocking_task = tokio::task::spawn_blocking(move || {
                 let file_reader = SerializedFileReader::new(reader).unwrap();
@@ -82,7 +89,7 @@ async fn print_json_from(source: Source, offset: u32, limit: i32, should_output_
                 Region::default(),
             )
             .await;
-            reader.start(Region::default()).await;
+            reader.start(Region::default(), timeout).await;
 
             let blocking_task = tokio::task::spawn_blocking(move || {
                 let file_reader = SerializedFileReader::new(reader).unwrap();
@@ -101,7 +108,6 @@ async fn print_json_from(source: Source, offset: u32, limit: i32, should_output_
 #[tokio::main]
 async fn main() {
     let matches = App::new("parquet2json")
-        .version("1.2.1")
         .about("Outputs Parquet as JSON")
         .arg(
             Arg::with_name("FILE")
@@ -133,19 +139,49 @@ async fn main() {
                 .help("Maximum number of rows to output")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("timeout")
+                .short(String::from('t'))
+                .long("timeout")
+                .value_name("NUMBER")
+                .help("Request timeout in seconds")
+                .takes_value(true),
+        )
         .get_matches();
 
     let output_thrift_schema: bool =
         value_t!(matches, "output_thrift_schema", bool).unwrap_or(false);
     let offset: u32 = value_t!(matches, "offset", u32).unwrap_or(0);
     let limit: i32 = value_t!(matches, "limit", i32).unwrap_or(-1);
+    let timeout = Duration::from_secs(value_t!(matches, "timeout", u32).unwrap_or(60).into());
     let file: String = value_t!(matches, "FILE", String).unwrap_or_else(|e| e.exit());
 
     if file.as_str().starts_with("s3://") {
-        print_json_from(Source::S3(file), offset, limit, output_thrift_schema).await;
+        print_json_from(
+            Source::S3(file),
+            offset,
+            limit,
+            output_thrift_schema,
+            timeout,
+        )
+        .await;
     } else if file.as_str().starts_with("http") {
-        print_json_from(Source::Http(file), offset, limit, output_thrift_schema).await;
+        print_json_from(
+            Source::Http(file),
+            offset,
+            limit,
+            output_thrift_schema,
+            timeout,
+        )
+        .await;
     } else {
-        print_json_from(Source::File(file), offset, limit, output_thrift_schema).await;
+        print_json_from(
+            Source::File(file),
+            offset,
+            limit,
+            output_thrift_schema,
+            timeout,
+        )
+        .await;
     }
 }
