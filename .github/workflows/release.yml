@@ -48,13 +48,13 @@ jobs:
             os: windows-latest
             name: parquet2json-i686-pc-windows-msvc.zip
 
-          - target: aarch64-pc-windows-msvc
-            os: windows-latest
-            name: parquet2json-aarch64-pc-windows-msvc.zip
+          # - target: aarch64-pc-windows-msvc
+          #   os: windows-latest
+          #   name: parquet2json-aarch64-pc-windows-msvc.zip
 
-          - target: x86_64-unknown-freebsd
-            os: ubuntu-latest
-            name: parquet2json-x86_64-unknown-freebsd.tar.gz
+          # - target: x86_64-unknown-freebsd
+          #   os: ubuntu-latest
+          #   name: parquet2json-x86_64-unknown-freebsd.tar.gz
 
     runs-on: ${{ matrix.os }}
     continue-on-error: true
