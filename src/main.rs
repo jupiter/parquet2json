@@ -141,10 +141,9 @@ async fn main() {
         )
         .arg(
             Arg::with_name("timeout")
-                .short(String::from('t'))
                 .long("timeout")
                 .value_name("NUMBER")
-                .help("Request timeout in seconds")
+                .help("Request timeout in seconds (default: 60)")
                 .takes_value(true),
         )
         .get_matches();

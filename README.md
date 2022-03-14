@@ -22,10 +22,8 @@ FLAGS:
 OPTIONS:
     -l, --limit <NUMBER>                    Maximum number of rows to output
     -o, --offset <NUMBER>                   Starts outputting from this row
-    -t, --output_thrift_schema <BOOLEAN>    Outputs thrift schema
-
-ARGS:
-    <FILE>    Location of Parquet input file (path, HTTP or S3 URL)
+    -t, --output_thrift_schema <BOOLEAN>    Outputs thrift schema first
+        --timeout <NUMBER>                  Request timeout in seconds (default: 60)
 ```
 
 ### S3 Settings
