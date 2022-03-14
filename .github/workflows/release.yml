@@ -148,4 +148,4 @@ jobs:
           override: true
 
       - name: Build | Publish
-        run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish --token ${{ secrets.CRATE_REGISTRY_PAT }}
