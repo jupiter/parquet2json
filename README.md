@@ -15,15 +15,15 @@ $ parquet2json --help
 USAGE:
     parquet2json [OPTIONS] <FILE>
 
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
+ARGS:
+    <FILE>    Location of Parquet input file (file path, HTTP or S3 URL)
 
 OPTIONS:
-    -l, --limit <NUMBER>                    Maximum number of rows to output
-    -o, --offset <NUMBER>                   Starts outputting from this row
-    -t, --output_thrift_schema <BOOLEAN>    Outputs thrift schema first
-        --timeout <NUMBER>                  Request timeout in seconds (default: 60)
+    -o, --offset <OFFSET>                  Starts outputting from this row [default: 0]
+    -l, --limit <LIMIT>                    Maximum number of rows to output
+    -t, --timeout <TIMEOUT>                Request timeout in seconds [default: 60]
+    -s, --schema-output <SCHEMA_OUTPUT>    Outputs thrift schema first
+    -h, --help                             Print help information
 ```
 
 ### S3 Settings

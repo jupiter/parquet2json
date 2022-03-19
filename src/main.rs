@@ -2,7 +2,7 @@ use core::time::Duration;
 use std::fs::File;
 use std::path::Path;
 
-use clap::{value_t, App, Arg};
+use clap::{AppSettings, Parser};
 use parquet::file::reader::{ChunkReader, FileReader, SerializedFileReader};
 use parquet::record::reader::RowIter;
 use parquet::schema::printer::print_schema;
@@ -105,55 +105,39 @@ async fn print_json_from(
     };
 }
 
+#[derive(Parser)]
+#[clap(global_setting(AppSettings::DeriveDisplayOrder))]
+#[clap(version, about, long_about = None)]
+struct Cli {
+    /// Location of Parquet input file (file path, HTTP or S3 URL)
+    file: String,
+
+    /// Starts outputting from this row
+    #[clap(default_value_t = 0, short, long, parse(try_from_str))]
+    offset: u32,
+
+    /// Maximum number of rows to output
+    #[clap(short, long, parse(try_from_str))]
+    limit: Option<i32>,
+
+    /// Request timeout in seconds
+    #[clap(default_value_t = 60, short, long, parse(try_from_str))]
+    timeout: u16,
+
+    /// Outputs thrift schema first
+    #[clap(short, long)]
+    schema_output: Option<bool>,
+}
+
 #[tokio::main]
 async fn main() {
-    let matches = App::new("parquet2json")
-        .about("Outputs Parquet as JSON")
-        .arg(
-            Arg::with_name("FILE")
-                .help("Location of Parquet input file (path, HTTP or S3 URL)")
-                .required(true)
-                .index(1),
-        )
-        .arg(
-            Arg::with_name("output_thrift_schema")
-                .short(String::from("t"))
-                .long("output_thrift_schema")
-                .value_name("BOOLEAN")
-                .help("Outputs thrift schema first")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("offset")
-                .short(String::from('o'))
-                .long("offset")
-                .value_name("NUMBER")
-                .help("Starts outputting from this row")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("limit")
-                .short(String::from('l'))
-                .long("limit")
-                .value_name("NUMBER")
-                .help("Maximum number of rows to output")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("timeout")
-                .long("timeout")
-                .value_name("NUMBER")
-                .help("Request timeout in seconds (default: 60)")
-                .takes_value(true),
-        )
-        .get_matches();
+    let cli = Cli::parse();
 
-    let output_thrift_schema: bool =
-        value_t!(matches, "output_thrift_schema", bool).unwrap_or(false);
-    let offset: u32 = value_t!(matches, "offset", u32).unwrap_or(0);
-    let limit: i32 = value_t!(matches, "limit", i32).unwrap_or(-1);
-    let timeout = Duration::from_secs(value_t!(matches, "timeout", u32).unwrap_or(60).into());
-    let file: String = value_t!(matches, "FILE", String).unwrap_or_else(|e| e.exit());
+    let output_thrift_schema = cli.schema_output.unwrap_or(false);
+    let offset = cli.offset;
+    let limit: i32 = cli.limit.unwrap_or(-1);
+    let timeout = Duration::from_secs(cli.timeout.into());
+    let file = cli.file;
 
     if file.as_str().starts_with("s3://") {
         print_json_from(
