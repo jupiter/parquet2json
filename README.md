@@ -22,7 +22,8 @@ OPTIONS:
     -o, --offset <OFFSET>                  Starts outputting from this row [default: 0]
     -l, --limit <LIMIT>                    Maximum number of rows to output
     -t, --timeout <TIMEOUT>                Request timeout in seconds [default: 60]
-    -s, --schema-output <SCHEMA_OUTPUT>    Outputs thrift schema first
+    -s, --schema-output <SCHEMA_OUTPUT>    Outputs thrift schema only
+    -c, --columns <COLUMNS>                Select columns by name (comma,separated)
     -h, --help                             Print help information
 ```
 
