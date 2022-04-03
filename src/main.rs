@@ -22,21 +22,41 @@ enum Source {
     S3(String),
 }
 
-fn output_rows(iter: RowIter, offset: u32, limit: i32) {
+fn output_rows<R: 'static + ChunkReader>(
+    file_reader: &SerializedFileReader<R>,
+    projection: Option<SchemaType>,
+    offset: u32,
+    limit: i32,
+) {
     let mut input_rows_count = 0;
     let mut output_rows_count = 0;
-    for record in iter {
-        input_rows_count += 1;
-        if input_rows_count < offset {
+    let mut i = 0;
+
+    for row_group in file_reader.metadata().row_groups() {
+        let row_group_rows = row_group.num_rows();
+        if input_rows_count + row_group_rows < offset.into() {
+            i += 1;
+            input_rows_count += row_group_rows;
             continue;
         }
 
-        output_rows_count += 1;
-        if limit > -1 && output_rows_count > limit {
-            return;
-        }
+        let row_group_reader = file_reader.get_row_group(i).unwrap();
+        i += 1;
 
-        println!("{}", record.to_json_value());
+        let iter = RowIter::from_row_group(projection.clone(), row_group_reader.as_ref()).unwrap();
+        for record in iter {
+            input_rows_count += 1;
+            if input_rows_count < offset.into() {
+                continue;
+            }
+
+            output_rows_count += 1;
+            if limit > -1 && output_rows_count > limit {
+                return;
+            }
+
+            println!("{}", record.to_json_value());
+        }
     }
 }
 
@@ -56,7 +76,7 @@ fn get_projection<R: 'static + ChunkReader>(
         Some(names) => {
             let parquet_metadata = file_reader.metadata();
             let schema = parquet_metadata.file_metadata().schema();
-            let column_names = names.split(",");
+            let column_names = names.split(',');
             let mut fields: Vec<Arc<SchemaType>> = vec![];
 
             for column_name in column_names {
@@ -97,7 +117,7 @@ async fn print_json_from(
                 output_thrift_schema(&file_reader);
             } else {
                 let projection = get_projection(&file_reader, column_names);
-                output_rows(file_reader.get_row_iter(projection).unwrap(), offset, limit);
+                output_rows(&file_reader, projection, offset, limit);
             }
         }
         Source::Http(url_str) => {
@@ -111,7 +131,7 @@ async fn print_json_from(
                     output_thrift_schema(&file_reader);
                 } else {
                     let projection = get_projection(&file_reader, column_names);
-                    output_rows(file_reader.get_row_iter(projection).unwrap(), offset, limit);
+                    output_rows(&file_reader, projection, offset, limit);
                 }
             });
             blocking_task.await.unwrap();
@@ -135,7 +155,7 @@ async fn print_json_from(
                     output_thrift_schema(&file_reader);
                 } else {
                     let projection = get_projection(&file_reader, column_names);
-                    output_rows(file_reader.get_row_iter(projection).unwrap(), offset, limit);
+                    output_rows(&file_reader, projection, offset, limit);
                 }
             });
             blocking_task.await.unwrap();
