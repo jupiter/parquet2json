@@ -1118,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "parquet2json"
-version = "1.6.1"
+version = "1.6.0"
 dependencies = [
  "bytes",
  "chunked-bytes",
