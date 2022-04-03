@@ -143,7 +143,10 @@ impl HttpChunkReader {
                                     return;
                                 }
                                 data.truncate(len);
-                                reader_channel.send(data).unwrap();
+                                match reader_channel.send(data) {
+                                    Ok(_) => {}
+                                    Err(_err) => { /* Ignore closed channel */ }
+                                }
                             }
                             io::Result::Err(_) => unimplemented!(),
                         };
