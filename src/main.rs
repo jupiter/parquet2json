@@ -9,6 +9,7 @@ use parquet::record::reader::RowIter;
 use parquet::schema::printer::print_schema;
 use parquet::schema::types::Type as SchemaType;
 use rusoto_core::Region;
+use rusoto_s3::S3Client;
 use url::Url;
 
 mod http_reader;
@@ -140,13 +141,14 @@ async fn print_json_from(
             let url = Url::parse(&url_str).unwrap();
             let host_str = url.host_str().unwrap();
             let key = &url.path()[1..];
+            let client = S3Client::new(Region::default());
 
             let mut reader = S3ChunkReader::new_unknown_size(
                 (String::from(host_str), String::from(key)),
-                Region::default(),
+                client.clone(),
             )
             .await;
-            reader.start(Region::default(), timeout).await;
+            reader.start(client.clone(), timeout).await;
 
             let blocking_task = tokio::task::spawn_blocking(move || {
                 let file_reader = SerializedFileReader::new(reader).unwrap();

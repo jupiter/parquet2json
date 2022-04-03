@@ -1,6 +1,7 @@
 use core::panic;
 use core::time::Duration;
 use std::io::{self, Read};
+use std::sync::Arc;
 
 use bytes::buf::Reader;
 use bytes::{Buf, Bytes};
@@ -10,10 +11,10 @@ use parquet::data_type::AsBytes;
 use parquet::errors::Result;
 use parquet::file::reader::{ChunkReader, Length};
 use regex::Regex;
-use rusoto_core::Region;
 use rusoto_s3::{GetObjectOutput, GetObjectRequest, S3Client, S3};
 use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::Semaphore;
 use tokio_stream::StreamExt;
 
 enum Range {
@@ -54,13 +55,13 @@ async fn fetch_range(client: S3Client, url: (String, String), range: Range) -> G
         Range::FromEnd(length) => format!("bytes=-{}", length),
     };
 
+    println!("{}, {}, {}", url.0, url.1, range_str);
     let get_obj_req = GetObjectRequest {
         bucket: url.0,
         key: url.1,
         range: Some(range_str),
         ..Default::default()
     };
-
     client.get_object(get_obj_req).await.unwrap()
 }
 
@@ -93,8 +94,7 @@ impl S3ChunkReader {
         }
     }
 
-    pub async fn new_unknown_size(url: (String, String), region: Region) -> S3ChunkReader {
-        let client = S3Client::new(region);
+    pub async fn new_unknown_size(url: (String, String), client: S3Client) -> S3ChunkReader {
         let response = fetch_range(client.clone(), url.clone(), Range::FromEnd(4)).await;
         let content_range = get_content_range(&response);
         let mut magic_number: Vec<u8> = vec![];
@@ -111,15 +111,18 @@ impl S3ChunkReader {
         Self::new(url, content_range.total_length)
     }
 
-    pub async fn start(&mut self, region: Region, timeout: Duration) {
+    pub async fn start(&mut self, base_client: S3Client, timeout: Duration) {
         let (s, mut r) = channel(1);
         let url = self.url.clone();
         self.coordinator = Some(s);
+        let semaphore = Arc::new(Semaphore::new(32));
         tokio::spawn(async move {
             while let Some(download_part) = r.recv().await.unwrap_or(None) {
-                let client = S3Client::new(region.clone());
+                let client = base_client.clone();
                 let url = url.clone();
+                let semaphore_clone = Arc::clone(&semaphore);
                 tokio::spawn(async move {
+                    let permit = semaphore_clone.acquire().await.unwrap();
                     let response = fetch_range(
                         client,
                         url,
@@ -133,6 +136,7 @@ impl S3ChunkReader {
                     let body = response.body.unwrap().timeout(timeout);
                     tokio::pin!(body);
 
+                    drop(permit);
                     while let Ok(Some(data)) = body.try_next().await {
                         let reader_channel = download_part.reader_channel.clone();
                         reader_channel.send(data.unwrap()).await.unwrap_or(());
