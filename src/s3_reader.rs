@@ -55,7 +55,6 @@ async fn fetch_range(client: S3Client, url: (String, String), range: Range) -> G
         Range::FromEnd(length) => format!("bytes=-{}", length),
     };
 
-    println!("{}, {}, {}", url.0, url.1, range_str);
     let get_obj_req = GetObjectRequest {
         bucket: url.0,
         key: url.1,
