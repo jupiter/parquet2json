@@ -1,7 +1,7 @@
 [package]
 name = "parquet2json"
-description = "A command-line tool for converting Parquet to newline-delimited JSON"
-version = "1.6.1"
+description = "A command-line tool for streaming Parquet as line-delimited JSON"
+version = "2.0.0"
 edition = "2018"
 license = "MIT"
 authors = ["Pieter Raubenheimer <pieter@wavana.com>"]
@@ -14,7 +14,7 @@ crossbeam-channel = { version = "0.5.1" }
 clap = "3.1.6"
 lazy_static = { version = "1.4.0" }
 openssl = { version = "0.10", features = ["vendored"] }
-parquet = { version = "10.0.0", features = ["cli"] }
+parquet = { version = "11.0.0", features = ["cli"] }
 regex = { version = "1.5.4" }
 reqwest = { version = "0.11.10", features = ["blocking"] }
 rusoto_core = { version = "0.47.0", default_features = false, features=["rustls"] }
