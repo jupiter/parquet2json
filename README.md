@@ -6,7 +6,7 @@ It reads only required ranges from file, HTTP or S3 locations, and supports offs
 
 It uses the [Apache Parquet Official Native Rust Implementation](https://github.com/apache/arrow-rs/tree/master/parquet) which has excellent support for compression formats and complex types.
 
-## How to use it
+## How to use
 
 Install from [crates.io](https://crates.io) and execute from the command line, e.g.:
 
@@ -36,7 +36,7 @@ SUBCOMMANDS:
 
 Credentials are provided as per standard AWS toolchain, i.e. per environment variables (`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`), AWS credentials file or IAM ECS container/instance profile.
 
-The default AWS region must be set per environment variable (`AWS_DEFAULT_REGION`) o in AWS credentials file and must match region of the bucket the bucket is located in.
+The default AWS region must be set per environment variable (`AWS_DEFAULT_REGION`) in AWS credentials file and must match region of the object's bucket.
 
 ### Examples
 
