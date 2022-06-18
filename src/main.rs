@@ -14,10 +14,10 @@ use rusoto_core::Region;
 use rusoto_s3::S3Client;
 use url::Url;
 
-mod http_reader;
-use http_reader::HttpChunkReader;
-mod s3_reader;
-use s3_reader::S3ChunkReader;
+mod http_chunk_reader;
+use http_chunk_reader::HttpChunkReader;
+mod s3_chunk_reader;
+use s3_chunk_reader::S3ChunkReader;
 
 enum Source {
     File(String),

@@ -6,12 +6,14 @@ use std::sync::Arc;
 use bytes::buf::Reader;
 use bytes::{Buf, Bytes};
 use chunked_bytes::ChunkedBytes;
+use futures_retry::{FutureRetry, RetryPolicy};
 use lazy_static::lazy_static;
 use parquet::data_type::AsBytes;
 use parquet::errors::Result;
 use parquet::file::reader::{ChunkReader, Length};
 use regex::Regex;
-use rusoto_s3::{GetObjectOutput, GetObjectRequest, S3Client, S3};
+use rusoto_core::RusotoError;
+use rusoto_s3::{GetObjectError, GetObjectOutput, GetObjectRequest, S3Client, S3};
 use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Semaphore;
@@ -49,19 +51,52 @@ fn get_content_range(response: &GetObjectOutput) -> ContentRange {
     }
 }
 
-async fn fetch_range(client: S3Client, url: (String, String), range: Range) -> GetObjectOutput {
-    let range_str = match range {
+async fn fetch_range(client: &S3Client, url: (String, String), range: Range) -> GetObjectOutput {
+    let bucket = &url.0;
+    let key = &url.1;
+    let range_str = &match range {
         Range::FromPositionTo(start_pos, length) => format!("bytes={}-{}", start_pos, length),
         Range::FromEnd(length) => format!("bytes=-{}", length),
     };
 
-    let get_obj_req = GetObjectRequest {
-        bucket: url.0,
-        key: url.1,
-        range: Some(range_str),
-        ..Default::default()
-    };
-    client.get_object(get_obj_req).await.unwrap()
+    let delay_ms = 200;
+    let mut remaining_retries: usize = 3;
+    let handle_get_object_error =
+        |e: RusotoError<GetObjectError>| -> RetryPolicy<RusotoError<GetObjectError>> {
+            if remaining_retries == 0 {
+                return RetryPolicy::ForwardError(e);
+            }
+            remaining_retries -= 1;
+            match e {
+                RusotoError::HttpDispatch(_) | RusotoError::ParseError(_) => {
+                    RetryPolicy::WaitRetry(Duration::from_millis(delay_ms))
+                }
+                RusotoError::Unknown(r) => {
+                    if r.status.is_server_error() {
+                        RetryPolicy::WaitRetry(Duration::from_millis(delay_ms))
+                    } else {
+                        RetryPolicy::ForwardError(RusotoError::Unknown(r))
+                    }
+                }
+                _ => RetryPolicy::ForwardError(e),
+            }
+        };
+
+    let (output, _) = FutureRetry::new(
+        move || {
+            let get_obj_req = GetObjectRequest {
+                bucket: bucket.clone(),
+                key: key.clone(),
+                range: Some(range_str.clone()),
+                ..Default::default()
+            };
+            client.get_object(get_obj_req)
+        },
+        handle_get_object_error,
+    )
+    .await
+    .unwrap();
+    output
 }
 
 struct DownloadPart {
@@ -94,7 +129,7 @@ impl S3ChunkReader {
     }
 
     pub async fn new_unknown_size(url: (String, String), client: S3Client) -> S3ChunkReader {
-        let response = fetch_range(client.clone(), url.clone(), Range::FromEnd(4)).await;
+        let response = fetch_range(&client, url.clone(), Range::FromEnd(4)).await;
         let content_range = get_content_range(&response);
         let mut magic_number: Vec<u8> = vec![];
         response
@@ -123,7 +158,7 @@ impl S3ChunkReader {
                 tokio::spawn(async move {
                     let permit = semaphore_clone.acquire().await.unwrap();
                     let response = fetch_range(
-                        client,
+                        &client,
                         url,
                         Range::FromPositionTo(
                             download_part.start_pos,
