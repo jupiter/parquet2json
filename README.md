@@ -30,6 +30,18 @@ SUBCOMMANDS:
     schema      Outputs the Thrift schema
     rowcount    Outputs only the total row count
     help        Print this message or the help of the given subcommand(s)
+
+$ parquet2json cat --help
+
+USAGE:
+    parquet2json <FILE> cat [OPTIONS]
+
+OPTIONS:
+    -o, --offset <OFFSET>      Starts outputting from this row (first row: 0, last row: -1)
+                               [default: 0]
+    -l, --limit <LIMIT>        Maximum number of rows to output [default: -1]
+    -c, --columns <COLUMNS>    Select columns by name (comma,separated)
+    -h, --help                 Print help information
 ```
 
 ### S3 Settings

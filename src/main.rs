@@ -1,6 +1,8 @@
 use core::time::Duration;
 use std::convert::TryInto;
 use std::fs::File;
+use std::{io, process};
+use std::io::Write;
 use std::ops::Add;
 use std::path::Path;
 use std::sync::Arc;
@@ -31,6 +33,7 @@ fn output_rows<R: 'static + ChunkReader>(
     offset: u32,
     limit: i32,
 ) {
+    let mut stdout = io::stdout();
     let mut input_rows_count = 0;
     let mut output_rows_count = 0;
     let mut i = 0;
@@ -58,7 +61,18 @@ fn output_rows<R: 'static + ChunkReader>(
                 return;
             }
 
-            println!("{}", record.to_json_value());
+            let result = write!(stdout, "{}\n", record.to_json_value());
+            match result {
+                Ok(_) => (),
+                Err(err) => {
+                    let error_code = err.raw_os_error().unwrap();
+                    if error_code == 32 {
+                        process::exit(144);
+                    } else {
+                        process::exit(144);
+                    }
+                }
+            }
         }
     }
 }
