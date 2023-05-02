@@ -186,7 +186,7 @@ impl Read for HttpChunkReader {
                 let readable_size = std::cmp::min(buf.len(), self.buf.len());
                 let drain = self.buf.drain(0..readable_size);
                 let data = drain.as_slice();
-                buf[0..readable_size as usize].copy_from_slice(&data[0..readable_size]);
+                buf[0..readable_size].copy_from_slice(&data[0..readable_size]);
                 self.reader_channel = Some(reader_channel);
                 Ok(readable_size)
             }

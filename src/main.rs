@@ -83,15 +83,22 @@ fn get_projection<R: 'static + ChunkReader>(
             let mut fields: Vec<Arc<SchemaType>> = vec![];
 
             for column_name in column_names {
-                let found = schema
-                    .get_fields()
-                    .as_ref()
-                    .iter()
-                    .find(|field| field.name().eq(column_name));
+                let is_optional = column_name.starts_with('?');
+                let found = schema.get_fields().as_ref().iter().find(|field| {
+                    field.name().eq(if is_optional {
+                        &column_name[1..]
+                    } else {
+                        column_name
+                    })
+                });
 
                 match found {
                     Some(field) => fields.push(field.clone()),
-                    None => panic!("Column not found ({})", column_name),
+                    None => {
+                        if !is_optional {
+                            panic!("Column not found ({})", column_name)
+                        }
+                    }
                 }
             }
             return Some(SchemaType::GroupType {
@@ -141,7 +148,7 @@ fn output_for_command<R: 'static + ChunkReader>(
 async fn handle_command(source: Source, timeout: Duration, command: Commands) {
     match source {
         Source::File(path) => {
-            let file = File::open(&Path::new(&path)).unwrap();
+            let file = File::open(Path::new(&path)).unwrap();
             let file_reader = SerializedFileReader::new(file).unwrap();
 
             output_for_command(file_reader, &command);
@@ -207,7 +214,7 @@ enum Commands {
         #[clap(short, long, parse(try_from_str), default_value_t = -1)]
         limit: i32,
 
-        /// Select columns by name (comma,separated)
+        /// Select columns by name (comma,separated,?prefixed_optional)
         #[clap(short, long)]
         columns: Option<String>,
     },
