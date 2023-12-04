@@ -63,11 +63,11 @@ $ parquet2json ./myfile.pq cat > output.jsonl
 #### From S3 or HTTP (S3)
 
 ```shell
-$ parquet2json s3://amazon-reviews-pds/parquet/product_category=Gift_Card/part-00000-495c48e6-96d6-4650-aa65-3c36a3516ddd.c000.snappy.parquet cat
+$ parquet2json s3://noaa-ghcn-pds/parquet/by_year/YEAR=2022/ELEMENT=ADPT/c771f8c0ea844998a1c8a9d5b8f269db_0.snappy.parquet cat
 ```
 
 ```shell
-$ parquet2json https://amazon-reviews-pds.s3.us-east-1.amazonaws.com/parquet/product_category%3DGift_Card/part-00000-495c48e6-96d6-4650-aa65-3c36a3516ddd.c000.snappy.parquet cat
+$ parquet2json https://noaa-ghcn-pds.s3.amazonaws.com/parquet/by_year/YEAR%3D2022/ELEMENT%3DADPT/c771f8c0ea844998a1c8a9d5b8f269db_0.snappy.parquet cat
 ```
 
 #### Filter selected columns with jq

@@ -12,7 +12,6 @@ use parquet::schema::printer::print_schema;
 use parquet::schema::types::Type as SchemaType;
 use rusoto_core::Region;
 use rusoto_s3::S3Client;
-use url::Url;
 
 mod http_chunk_reader;
 use http_chunk_reader::HttpChunkReader;
@@ -165,9 +164,9 @@ async fn handle_command(source: Source, timeout: Duration, command: Commands) {
             blocking_task.await.unwrap();
         }
         Source::S3(url_str) => {
-            let url = Url::parse(&url_str).unwrap();
-            let host_str = url.host_str().unwrap();
-            let key = &url.path()[1..];
+            let path_pos = url_str[4..].find('/').unwrap() + 4;
+            let host_str = url_str.get(4..path_pos).unwrap();
+            let key = url_str.get((path_pos + 1)..).unwrap();
             let client = S3Client::new(Region::default());
 
             let mut reader = S3ChunkReader::new_unknown_size(
