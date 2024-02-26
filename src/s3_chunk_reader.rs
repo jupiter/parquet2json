@@ -215,7 +215,7 @@ impl Read for S3ChunkReader {
 impl ChunkReader for S3ChunkReader {
     type T = S3ChunkReader;
 
-    fn get_read(&self, start_pos: u64, length: usize) -> Result<Self::T> {
+    fn get_read(&self, start_pos: u64) -> Result<Self::T> {
         let (s, r) = channel(16);
 
         self.coordinator
@@ -223,7 +223,7 @@ impl ChunkReader for S3ChunkReader {
             .unwrap()
             .blocking_send(Some(DownloadPart {
                 start_pos,
-                length: length as u64,
+                length: self.length as u64,
                 reader_channel: s,
             }))
             .unwrap_or_else(|err| {
@@ -233,12 +233,34 @@ impl ChunkReader for S3ChunkReader {
 
         Ok(S3ChunkReader {
             url: self.url.clone(),
-            length: length as u64,
+            length: self.length as u64,
             read_size: 0,
             total_size: self.total_size,
             coordinator: self.coordinator.clone(),
             reader_channel: Some(r),
             buf: ChunkedBytes::new().reader(),
         })
+    }
+
+    fn get_bytes(&self, start: u64, length: usize) -> Result<bytes::Bytes> {
+        let (s, mut r) = channel(16);
+
+        self.coordinator
+            .clone()
+            .unwrap()
+            .blocking_send(Some(DownloadPart {
+                start_pos: start,
+                length: length as u64,
+                reader_channel: s,
+            }))
+            .unwrap_or_else(|err| {
+                eprintln!("Error {}", err);
+                unimplemented!()
+            });
+        let mut buf = ChunkedBytes::new();
+        while let Some(data) = r.blocking_recv() {
+            buf.put_bytes(data);
+        }
+        Ok(buf.copy_to_bytes(length))
     }
 }

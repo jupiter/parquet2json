@@ -4,6 +4,8 @@ use std::io::{self, Read};
 use std::result;
 use std::thread;
 
+use bytes::{Buf, Bytes};
+use chunked_bytes::ChunkedBytes;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use lazy_static::lazy_static;
 use parquet::errors::Result;
@@ -198,7 +200,7 @@ impl Read for HttpChunkReader {
 impl ChunkReader for HttpChunkReader {
     type T = HttpChunkReader;
 
-    fn get_read(&self, start_pos: u64, length: usize) -> Result<Self::T> {
+    fn get_read(&self, start_pos: u64) -> Result<Self::T> {
         let (s, r) = bounded(0);
 
         self.coordinator
@@ -206,19 +208,39 @@ impl ChunkReader for HttpChunkReader {
             .unwrap()
             .send(Some(DownloadPart {
                 start_pos,
-                length: length as u64,
+                length: self.length as u64,
                 reader_channel: s,
             }))
             .unwrap();
 
         Ok(HttpChunkReader {
             url: self.url.clone(),
-            length: length as u64,
+            length: self.length as u64,
             read_size: 0,
             total_size: self.total_size,
             coordinator: self.coordinator.clone(),
             reader_channel: Some(r),
             buf: Vec::new(),
         })
+    }
+
+    fn get_bytes(&self, start: u64, length: usize) -> Result<bytes::Bytes> {
+        let (s, r) = bounded(0);
+
+        self.coordinator
+            .clone()
+            .unwrap()
+            .send(Some(DownloadPart {
+                start_pos: start,
+                length: length as u64,
+                reader_channel: s,
+            }))
+            .unwrap();
+
+        let mut buf = ChunkedBytes::new();
+        while let Ok(data) = r.recv() {
+            buf.put_bytes(Bytes::from(data))
+        }
+        Ok(buf.copy_to_bytes(length))
     }
 }
