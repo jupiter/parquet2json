@@ -57,7 +57,7 @@ fn output_rows<R: 'static + ChunkReader>(
                 return;
             }
 
-            println!("{}", record.to_json_value());
+            println!("{}", record.unwrap().to_json_value());
         }
     }
 }

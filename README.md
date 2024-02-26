@@ -63,11 +63,11 @@ $ parquet2json ./myfile.pq cat > output.jsonl
 #### From S3 or HTTP (S3)
 
 ```shell
-$ parquet2json s3://noaa-ghcn-pds/parquet/by_year/YEAR=2022/ELEMENT=ADPT/c771f8c0ea844998a1c8a9d5b8f269db_0.snappy.parquet cat
+$ parquet2json "s3://nyc-tlc/trip data/yellow_tripdata_2023-06.parquet" cat
 ```
 
 ```shell
-$ parquet2json https://noaa-ghcn-pds.s3.amazonaws.com/parquet/by_year/YEAR%3D2022/ELEMENT%3DADPT/c771f8c0ea844998a1c8a9d5b8f269db_0.snappy.parquet cat
+$ parquet2json https://overturemaps-us-west-2.s3.amazonaws.com/release/2024-02-15-alpha.0/theme=transportation/type=segment/part-00043-538084d1-2216-4d25-bc98-c03ba9a8aea4-c000.zstd.parquet cat
 ```
 
 #### Filter selected columns with jq
