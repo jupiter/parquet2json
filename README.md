@@ -14,34 +14,30 @@ Install from [crates.io](https://crates.io) and execute from the command line, e
 $ cargo install parquet2json
 $ parquet2json --help
 
-USAGE:
-    parquet2json [OPTIONS] <FILE> <SUBCOMMAND>
+Usage: parquet2json <FILE> <COMMAND>
 
-ARGS:
-    <FILE>    Location of Parquet input file (file path, HTTP or S3 URL)
+Commands:
+  cat       Outputs data as JSON lines
+  schema    Outputs the Thrift schema
+  rowcount  Outputs only the total row count
+  help      Print this message or the help of the given subcommand(s)
 
-OPTIONS:
-    -t, --timeout <TIMEOUT>    Request timeout in seconds [default: 60]
-    -h, --help                 Print help information
-    -V, --version              Print version information
+Arguments:
+  <FILE>  Location of Parquet input file (file path, HTTP or S3 URL)
 
-SUBCOMMANDS:
-    cat         Outputs data as JSON lines
-    schema      Outputs the Thrift schema
-    rowcount    Outputs only the total row count
-    help        Print this message or the help of the given subcommand(s)
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
 
 $ parquet2json cat --help
 
-USAGE:
-    parquet2json <FILE> cat [OPTIONS]
+Usage: parquet2json <FILE> cat [OPTIONS]
 
-OPTIONS:
-    -o, --offset <OFFSET>      Starts outputting from this row (first row: 0, last row: -1)
-                               [default: 0]
-    -l, --limit <LIMIT>        Maximum number of rows to output [default: -1]
-    -c, --columns <COLUMNS>    Select columns by name (comma,separated,?prefixed_optional)
-    -h, --help                 Print help information
+Options:
+  -o, --offset <OFFSET>    Starts outputting from this row (first row: 0, last row: -1) [default: 0]
+  -l, --limit <LIMIT>      Maximum number of rows to output
+  -c, --columns <COLUMNS>  Select columns by name (comma,separated,?prefixed_optional)
+  -h, --help               Print help
 ```
 
 ### S3 Settings
@@ -57,17 +53,17 @@ Use it to stream output to files and other tools such as `grep` and [jq](https:/
 #### Output to a file
 
 ```shell
-$ parquet2json ./myfile.pq cat > output.jsonl
+$ parquet2json ./myfile.parquet cat > output.jsonl
 ```
 
 #### From S3 or HTTP (S3)
 
 ```shell
-$ parquet2json s3://noaa-ghcn-pds/parquet/by_year/YEAR=2022/ELEMENT=ADPT/c771f8c0ea844998a1c8a9d5b8f269db_0.snappy.parquet cat
+$ parquet2json s3://noaa-ghcn-pds/parquet/by_year/YEAR=2024/ELEMENT=AWDR/83d5f1ef1edf4e3c838b15f56f07dc02_0.snappy.parquet cat
 ```
 
 ```shell
-$ parquet2json https://noaa-ghcn-pds.s3.amazonaws.com/parquet/by_year/YEAR%3D2022/ELEMENT%3DADPT/c771f8c0ea844998a1c8a9d5b8f269db_0.snappy.parquet cat
+$ parquet2json https://noaa-ghcn-pds.s3.amazonaws.com/parquet/by_year/YEAR%3D2024/ELEMENT%3DAWDR/83d5f1ef1edf4e3c838b15f56f07dc02_0.snappy.parquet cat
 ```
 
 #### Filter selected columns with jq

@@ -1,3 +1,4 @@
+use std::ops::Add;
 use std::sync::Arc;
 
 use arrow_json::writer::LineDelimitedWriter;
@@ -6,12 +7,15 @@ use aws_config::profile::profile_file::ProfileFiles;
 use aws_types::os_shim_internal::{Env, Fs};
 use clap::{Parser, Subcommand};
 use object_store::aws::AmazonS3Builder;
+use object_store::http::HttpBuilder;
+use object_store::local::LocalFileSystem;
 use object_store::path::Path;
 use object_store::ObjectStore;
-use parquet::arrow::async_reader::ParquetObjectReader;
+use parquet::arrow::arrow_reader::ArrowReaderMetadata;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
+use parquet::arrow::{async_reader::ParquetObjectReader, ProjectionMask};
 use parquet::schema::printer::print_schema;
-use tokio_stream::{self as stream, StreamExt};
+use tokio_stream::StreamExt;
 use url::Url;
 use urlencoding::decode;
 
@@ -20,10 +24,6 @@ use urlencoding::decode;
 struct Cli {
     /// Location of Parquet input file (file path, HTTP or S3 URL)
     file: String,
-
-    /// Request timeout in seconds
-    #[clap(default_value_t = 60, short, long)]
-    timeout: u16,
 
     #[clap(subcommand)]
     command: Commands,
@@ -38,8 +38,8 @@ enum Commands {
         offset: i64,
 
         /// Maximum number of rows to output
-        #[clap(short, long, default_value_t = -1)]
-        limit: i32,
+        #[clap(short, long)]
+        limit: Option<usize>,
 
         /// Select columns by name (comma,separated,?prefixed_optional)
         #[clap(short, long)]
@@ -53,17 +53,93 @@ enum Commands {
     Rowcount {},
 }
 
+async fn output_for_command(mut reader: ParquetObjectReader, command: &Commands) {
+    let metadata = ArrowReaderMetadata::load_async(&mut reader, Default::default())
+        .await
+        .unwrap();
+    let metadata_clone = metadata.clone();
+    let parquet_metadata = metadata_clone.metadata();
+    let mut async_reader_builder =
+        ParquetRecordBatchStreamBuilder::new_with_metadata(reader, metadata);
+
+    match command {
+        Commands::Cat {
+            offset,
+            limit,
+            columns,
+        } => {
+            let absolute_offset: usize = if offset.is_negative() {
+                parquet_metadata
+                    .file_metadata()
+                    .num_rows()
+                    .add(offset)
+                    .try_into()
+                    .unwrap()
+            } else {
+                offset.abs().try_into().unwrap()
+            };
+            async_reader_builder = async_reader_builder.with_offset(absolute_offset);
+
+            if let Some(limit) = limit {
+                async_reader_builder = async_reader_builder.with_limit(limit.clone())
+            }
+
+            if let Some(columns) = columns {
+                let column_names = columns.split(',');
+
+                let schema_descr = parquet_metadata.file_metadata().schema_descr();
+                let root_schema = schema_descr.root_schema().get_fields();
+
+                let mut indices: Vec<usize> = vec![];
+                for column_name in column_names {
+                    let is_optional = column_name.starts_with('?');
+                    let found = root_schema.iter().position(|field| {
+                        field.name().eq(if is_optional {
+                            &column_name[1..]
+                        } else {
+                            column_name
+                        })
+                    });
+
+                    match found {
+                        Some(field) => indices.push(field),
+                        None => {
+                            if !is_optional {
+                                panic!("Column not found ({})", column_name)
+                            }
+                        }
+                    }
+                }
+                let projection_mask = ProjectionMask::roots(schema_descr, indices);
+                async_reader_builder = async_reader_builder.with_projection(projection_mask);
+            }
+
+            let mut iter = async_reader_builder.build().unwrap();
+            let mut json_writer = LineDelimitedWriter::new(std::io::stdout());
+
+            while let Some(Ok(batch)) = iter.next().await {
+                let _ = json_writer.write(&batch);
+            }
+            json_writer.finish().unwrap();
+        }
+        Commands::Schema {} => {
+            print_schema(
+                &mut std::io::stdout(),
+                parquet_metadata.file_metadata().schema(),
+            );
+        }
+        Commands::Rowcount {} => {
+            println!("{}", parquet_metadata.file_metadata().num_rows());
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
     let file = cli.file;
 
-    // let timeout = Duration::from_secs(cli.timeout.into());
-
     if file.as_str().starts_with("s3://") {
-        // Needs compatibility with https://github.com/rusoto/rusoto/blob/master/AWS-CREDENTIALS.md
-        // Source::S3(file)
-
         let mut s3_builder: AmazonS3Builder = AmazonS3Builder::from_env();
 
         match load(
@@ -101,28 +177,27 @@ async fn main() {
         );
         let location = Path::from(decode(url.path()).unwrap().as_ref());
         let meta = storage_container.head(&location).await.unwrap();
-        println!("Found Blob with {}B at {}", meta.size, meta.location);
-
         let reader = ParquetObjectReader::new(storage_container, meta);
-        let async_reader_builder = ParquetRecordBatchStreamBuilder::new(reader).await.unwrap();
 
-        let parquet_metadata = async_reader_builder.metadata();
-        print_schema(
-            &mut std::io::stdout(),
-            parquet_metadata.file_metadata().schema(),
-        );
-
-        let mut json_writer = LineDelimitedWriter::new(std::io::stdout());
-        let mut iter = async_reader_builder.build().unwrap();
-        while let Ok(batch) = iter.next().await.unwrap() {
-            let _ = json_writer.write(&batch);
-        }
-        json_writer.finish().unwrap();
+        output_for_command(reader, &cli.command).await;
     } else if file.as_str().starts_with("http") {
-        // Source::Http(file)
-    } else {
-        // Source::File(file)
-    };
+        let url = Url::parse(file.as_ref()).unwrap();
 
-    // handle_command(source, timeout, cli.command).await;
+        let storage_container = Arc::new(HttpBuilder::new().with_url(url).build().unwrap());
+        let location = Path::from("");
+        let meta = storage_container.head(&location).await.unwrap();
+        let reader = ParquetObjectReader::new(storage_container, meta);
+
+        output_for_command(reader, &cli.command).await;
+    } else {
+        let storage_container = Arc::new(LocalFileSystem::new());
+        let str: &str = file.as_ref();
+        let file_path_buf = std::fs::canonicalize(str).unwrap();
+        let file_path = file_path_buf.to_str().unwrap();
+        let location = Path::from(file_path);
+        let meta = storage_container.head(&location).await.unwrap();
+        let reader = ParquetObjectReader::new(storage_container, meta);
+
+        output_for_command(reader, &cli.command).await;
+    };
 }

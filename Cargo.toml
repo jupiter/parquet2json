@@ -12,7 +12,7 @@ arrow-json = { version = "51.0.0" }
 aws-config = { version = "1.1.8" }
 aws-types = { version = "1.1.8" }
 clap = { version = "4.5.4", features = ["derive"] }
-object_store = { version = "0.9.1", features = ["aws"] }
+object_store = { version = "0.9.1", features = ["aws", "http"] }
 parquet = { version = "51.0.0", features = ["async", "json", "object_store"]}
 tokio = { version = "1.36.0", features = ["rt-multi-thread"] }
 tokio-stream = { version = "0.1" }
