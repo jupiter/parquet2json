@@ -1,217 +1,45 @@
-use core::time::Duration;
-use std::convert::TryInto;
-use std::fs::File;
 use std::ops::Add;
-use std::path::Path;
 use std::sync::Arc;
 
-use clap::{AppSettings, Parser, Subcommand};
-use parquet::file::reader::{ChunkReader, FileReader, SerializedFileReader};
-use parquet::record::reader::RowIter;
+use arrow_json::writer::LineDelimitedWriter;
+use aws_config::profile::load;
+use aws_config::profile::profile_file::ProfileFiles;
+use aws_types::os_shim_internal::{Env, Fs};
+use clap::{Parser, Subcommand};
+use object_store::aws::AmazonS3Builder;
+use object_store::http::HttpBuilder;
+use object_store::local::LocalFileSystem;
+use object_store::path::Path;
+use object_store::ObjectStore;
+use parquet::arrow::arrow_reader::ArrowReaderMetadata;
+use parquet::arrow::ParquetRecordBatchStreamBuilder;
+use parquet::arrow::{async_reader::ParquetObjectReader, ProjectionMask};
 use parquet::schema::printer::print_schema;
-use parquet::schema::types::Type as SchemaType;
-use rusoto_core::Region;
-use rusoto_s3::S3Client;
+use tokio_stream::StreamExt;
+use url::Url;
+use urlencoding::decode;
 
-mod http_chunk_reader;
-use http_chunk_reader::HttpChunkReader;
-mod s3_chunk_reader;
-use s3_chunk_reader::S3ChunkReader;
-
-enum Source {
-    File(String),
-    Http(String),
-    S3(String),
-}
-
-fn output_rows<R: 'static + ChunkReader>(
-    file_reader: &SerializedFileReader<R>,
-    projection: Option<SchemaType>,
-    offset: u32,
-    limit: i32,
-) {
-    let mut input_rows_count = 0;
-    let mut output_rows_count = 0;
-    let mut i = 0;
-
-    for row_group in file_reader.metadata().row_groups() {
-        let row_group_rows = row_group.num_rows();
-        if input_rows_count + row_group_rows < offset.into() {
-            i += 1;
-            input_rows_count += row_group_rows;
-            continue;
-        }
-
-        let row_group_reader = file_reader.get_row_group(i).unwrap();
-        i += 1;
-
-        let iter = RowIter::from_row_group(projection.clone(), row_group_reader.as_ref()).unwrap();
-        for record in iter {
-            input_rows_count += 1;
-            if input_rows_count < offset.into() {
-                continue;
-            }
-
-            output_rows_count += 1;
-            if limit > -1 && output_rows_count > limit {
-                return;
-            }
-
-            println!("{}", record.to_json_value());
-        }
-    }
-}
-
-fn output_thrift_schema<R: 'static + ChunkReader>(file_reader: &SerializedFileReader<R>) {
-    let parquet_metadata = file_reader.metadata();
-    print_schema(
-        &mut std::io::stdout(),
-        parquet_metadata.file_metadata().schema(),
-    );
-}
-
-fn get_projection<R: 'static + ChunkReader>(
-    file_reader: &SerializedFileReader<R>,
-    column_names: Option<String>,
-) -> Option<SchemaType> {
-    match column_names {
-        Some(names) => {
-            let parquet_metadata = file_reader.metadata();
-            let schema = parquet_metadata.file_metadata().schema();
-            let column_names = names.split(',');
-            let mut fields: Vec<Arc<SchemaType>> = vec![];
-
-            for column_name in column_names {
-                let is_optional = column_name.starts_with('?');
-                let found = schema.get_fields().as_ref().iter().find(|field| {
-                    field.name().eq(if is_optional {
-                        &column_name[1..]
-                    } else {
-                        column_name
-                    })
-                });
-
-                match found {
-                    Some(field) => fields.push(field.clone()),
-                    None => {
-                        if !is_optional {
-                            panic!("Column not found ({})", column_name)
-                        }
-                    }
-                }
-            }
-            return Some(SchemaType::GroupType {
-                basic_info: schema.get_basic_info().clone(),
-                fields,
-            });
-        }
-        None => None,
-    }
-}
-
-fn output_for_command<R: 'static + ChunkReader>(
-    file_reader: SerializedFileReader<R>,
-    command: &Commands,
-) {
-    match command {
-        Commands::Cat {
-            offset,
-            limit,
-            columns,
-        } => {
-            let absolute_offset: u32 = if offset.is_negative() {
-                let parquet_metadata = file_reader.metadata();
-                parquet_metadata
-                    .file_metadata()
-                    .num_rows()
-                    .add(offset + 1)
-                    .try_into()
-                    .unwrap()
-            } else {
-                offset.abs().try_into().unwrap()
-            };
-            let projection = get_projection(&file_reader, columns.clone());
-            output_rows(&file_reader, projection, absolute_offset, *limit);
-        }
-        Commands::Schema {} => {
-            output_thrift_schema(&file_reader);
-        }
-        Commands::Rowcount {} => {
-            let parquet_metadata = file_reader.metadata();
-
-            println!("{}", parquet_metadata.file_metadata().num_rows());
-        }
-    }
-}
-
-async fn handle_command(source: Source, timeout: Duration, command: Commands) {
-    match source {
-        Source::File(path) => {
-            let file = File::open(Path::new(&path)).unwrap();
-            let file_reader = SerializedFileReader::new(file).unwrap();
-
-            output_for_command(file_reader, &command);
-        }
-        Source::Http(url_str) => {
-            let mut reader = HttpChunkReader::new_unknown_size(url_str).await;
-            reader.start(timeout);
-
-            let blocking_task = tokio::task::spawn_blocking(move || {
-                let file_reader = SerializedFileReader::new(reader).unwrap();
-
-                output_for_command(file_reader, &command);
-            });
-            blocking_task.await.unwrap();
-        }
-        Source::S3(url_str) => {
-            let path_pos = url_str[4..].find('/').unwrap() + 4;
-            let host_str = url_str.get(4..path_pos).unwrap();
-            let key = url_str.get((path_pos + 1)..).unwrap();
-            let client = S3Client::new(Region::default());
-
-            let mut reader = S3ChunkReader::new_unknown_size(
-                (String::from(host_str), String::from(key)),
-                client.clone(),
-            )
-            .await;
-            reader.start(client.clone(), timeout).await;
-
-            let blocking_task = tokio::task::spawn_blocking(move || {
-                let file_reader = SerializedFileReader::new(reader).unwrap();
-
-                output_for_command(file_reader, &command);
-            });
-            blocking_task.await.unwrap();
-        }
-    };
-}
-
-#[derive(Parser)]
-#[clap(global_setting(AppSettings::DeriveDisplayOrder))]
+#[derive(Parser, Clone)]
 #[clap(version, about, long_about = None)]
 struct Cli {
     /// Location of Parquet input file (file path, HTTP or S3 URL)
     file: String,
 
-    /// Request timeout in seconds
-    #[clap(default_value_t = 60, short, long, parse(try_from_str))]
-    timeout: u16,
-
     #[clap(subcommand)]
     command: Commands,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 enum Commands {
     /// Outputs data as JSON lines
     Cat {
         /// Starts outputting from this row (first row: 0, last row: -1)
-        #[clap(default_value_t = 0, short, long, parse(try_from_str))]
+        #[clap(default_value_t = 0, short, long)]
         offset: i64,
 
         /// Maximum number of rows to output
-        #[clap(short, long, parse(try_from_str), default_value_t = -1)]
-        limit: i32,
+        #[clap(short, long)]
+        limit: Option<usize>,
 
         /// Select columns by name (comma,separated,?prefixed_optional)
         #[clap(short, long)]
@@ -225,19 +53,148 @@ enum Commands {
     Rowcount {},
 }
 
+async fn output_for_command(mut reader: ParquetObjectReader, command: &Commands) {
+    let metadata = ArrowReaderMetadata::load_async(&mut reader, Default::default())
+        .await
+        .unwrap();
+    let metadata_clone = metadata.clone();
+    let parquet_metadata = metadata_clone.metadata();
+    let mut async_reader_builder =
+        ParquetRecordBatchStreamBuilder::new_with_metadata(reader, metadata);
+
+    match command {
+        Commands::Cat {
+            offset,
+            limit,
+            columns,
+        } => {
+            let absolute_offset: usize = if offset.is_negative() {
+                parquet_metadata
+                    .file_metadata()
+                    .num_rows()
+                    .add(offset)
+                    .try_into()
+                    .unwrap()
+            } else {
+                offset.abs().try_into().unwrap()
+            };
+            async_reader_builder = async_reader_builder.with_offset(absolute_offset);
+
+            if let Some(limit) = limit {
+                async_reader_builder = async_reader_builder.with_limit(*limit)
+            }
+
+            if let Some(columns) = columns {
+                let column_names = columns.split(',');
+
+                let schema_descr = parquet_metadata.file_metadata().schema_descr();
+                let root_schema = schema_descr.root_schema().get_fields();
+
+                let mut indices: Vec<usize> = vec![];
+                for column_name in column_names {
+                    let is_optional = column_name.starts_with('?');
+                    let found = root_schema.iter().position(|field| {
+                        field.name().eq(if is_optional {
+                            &column_name[1..]
+                        } else {
+                            column_name
+                        })
+                    });
+
+                    match found {
+                        Some(field) => indices.push(field),
+                        None => {
+                            if !is_optional {
+                                panic!("Column not found ({})", column_name)
+                            }
+                        }
+                    }
+                }
+                let projection_mask = ProjectionMask::roots(schema_descr, indices);
+                async_reader_builder = async_reader_builder.with_projection(projection_mask);
+            }
+
+            let mut iter = async_reader_builder.build().unwrap();
+            let mut json_writer = LineDelimitedWriter::new(std::io::stdout());
+
+            while let Some(Ok(batch)) = iter.next().await {
+                let _ = json_writer.write(&batch);
+            }
+            json_writer.finish().unwrap();
+        }
+        Commands::Schema {} => {
+            print_schema(
+                &mut std::io::stdout(),
+                parquet_metadata.file_metadata().schema(),
+            );
+        }
+        Commands::Rowcount {} => {
+            println!("{}", parquet_metadata.file_metadata().num_rows());
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
     let file = cli.file;
-    let timeout = Duration::from_secs(cli.timeout.into());
 
-    let source = if file.as_str().starts_with("s3://") {
-        Source::S3(file)
+    if file.as_str().starts_with("s3://") {
+        let mut s3_builder: AmazonS3Builder = AmazonS3Builder::from_env();
+
+        if let Ok(profile_set) = load(
+            &Fs::default(),
+            &Env::default(),
+            &ProfileFiles::default(),
+            None,
+        )
+        .await
+        {
+            if let Some(aws_access_key_id) = profile_set.get("aws_access_key_id") {
+                s3_builder = s3_builder.with_access_key_id(aws_access_key_id);
+            }
+            if let Some(aws_secret_access_key) = profile_set.get("aws_secret_access_key") {
+                s3_builder = s3_builder.with_secret_access_key(aws_secret_access_key);
+            }
+            if let Some(aws_session_token) = profile_set.get("aws_session_token") {
+                s3_builder = s3_builder.with_token(aws_session_token);
+            }
+            if let Some(region) = profile_set.get("region") {
+                s3_builder = s3_builder.with_region(region);
+            }
+        }
+
+        let url = Url::parse(file.as_ref()).unwrap();
+
+        let storage_container = Arc::new(
+            s3_builder
+                .with_bucket_name(decode(url.host_str().unwrap()).unwrap())
+                .build()
+                .unwrap(),
+        );
+        let location = Path::from(decode(url.path()).unwrap().as_ref());
+        let meta = storage_container.head(&location).await.unwrap();
+        let reader = ParquetObjectReader::new(storage_container, meta);
+
+        output_for_command(reader, &cli.command).await;
     } else if file.as_str().starts_with("http") {
-        Source::Http(file)
-    } else {
-        Source::File(file)
-    };
+        let url = Url::parse(file.as_ref()).unwrap();
 
-    handle_command(source, timeout, cli.command).await;
+        let storage_container = Arc::new(HttpBuilder::new().with_url(url).build().unwrap());
+        let location = Path::from("");
+        let meta = storage_container.head(&location).await.unwrap();
+        let reader = ParquetObjectReader::new(storage_container, meta);
+
+        output_for_command(reader, &cli.command).await;
+    } else {
+        let storage_container = Arc::new(LocalFileSystem::new());
+        let str: &str = file.as_ref();
+        let file_path_buf = std::fs::canonicalize(str).unwrap();
+        let file_path = file_path_buf.to_str().unwrap();
+        let location = Path::from(file_path);
+        let meta = storage_container.head(&location).await.unwrap();
+        let reader = ParquetObjectReader::new(storage_container, meta);
+
+        output_for_command(reader, &cli.command).await;
+    };
 }

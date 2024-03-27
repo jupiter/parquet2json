@@ -1,25 +1,20 @@
 [package]
 name = "parquet2json"
 description = "A command-line tool for streaming Parquet as line-delimited JSON"
-version = "2.2.0"
-edition = "2018"
+version = "3.0.0"
+edition = "2021"
 license = "MIT"
 authors = ["Pieter Raubenheimer <pieter@wavana.com>"]
 repository = "https://github.com/jupiter/parquet2json"
 
 [dependencies]
-bytes = { version = "1.0.1" }
-chunked-bytes = { version = "0.3.0" }
-crossbeam-channel = { version = "0.5.1" }
-clap = "3.2.25"
-lazy_static = { version = "1.4.0" }
-openssl = { version = "0.10", features = ["vendored"] }
-parquet = { version = "20.0.0", features = ["cli"] }
-regex = { version = "1.5.4" }
-reqwest = { version = "0.11.10", features = ["blocking"] }
-rusoto_core = { version = "0.48.0", default_features = false, features=["rustls"] }
-rusoto_s3 = { version = "0.48.0", default_features = false, features=["rustls"] }
-tokio = { version = "1.0" }
-futures-retry = { version = "0.6.0" }
-tokio-stream = { version = "0.1.7" }
-url = { version = "2.2.2" }
+arrow-json = { version = "51.0.0" }
+aws-config = { version = "1.1.8" }
+aws-types = { version = "1.1.8" }
+clap = { version = "4.5.4", features = ["derive"] }
+object_store = { version = "0.9.1", features = ["aws", "http"] }
+parquet = { version = "51.0.0", features = ["async", "json", "object_store"]}
+tokio = { version = "1.36.0", features = ["rt-multi-thread"] }
+tokio-stream = { version = "0.1" }
+url = { version = "2.5.0" }
+urlencoding = { version = "2.1.3" }
