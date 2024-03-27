@@ -81,7 +81,7 @@ async fn output_for_command(mut reader: ParquetObjectReader, command: &Commands)
             async_reader_builder = async_reader_builder.with_offset(absolute_offset);
 
             if let Some(limit) = limit {
-                async_reader_builder = async_reader_builder.with_limit(limit.clone())
+                async_reader_builder = async_reader_builder.with_limit(*limit)
             }
 
             if let Some(columns) = columns {
@@ -142,7 +142,7 @@ async fn main() {
     if file.as_str().starts_with("s3://") {
         let mut s3_builder: AmazonS3Builder = AmazonS3Builder::from_env();
 
-        match load(
+        if let Ok(profile_set) = load(
             &Fs::default(),
             &Env::default(),
             &ProfileFiles::default(),
@@ -150,21 +150,18 @@ async fn main() {
         )
         .await
         {
-            Ok(profile_set) => {
-                if let Some(aws_access_key_id) = profile_set.get("aws_access_key_id") {
-                    s3_builder = s3_builder.with_access_key_id(aws_access_key_id);
-                }
-                if let Some(aws_secret_access_key) = profile_set.get("aws_secret_access_key") {
-                    s3_builder = s3_builder.with_secret_access_key(aws_secret_access_key);
-                }
-                if let Some(aws_session_token) = profile_set.get("aws_session_token") {
-                    s3_builder = s3_builder.with_token(aws_session_token);
-                }
-                if let Some(region) = profile_set.get("region") {
-                    s3_builder = s3_builder.with_region(region);
-                }
+            if let Some(aws_access_key_id) = profile_set.get("aws_access_key_id") {
+                s3_builder = s3_builder.with_access_key_id(aws_access_key_id);
             }
-            Err(_) => {}
+            if let Some(aws_secret_access_key) = profile_set.get("aws_secret_access_key") {
+                s3_builder = s3_builder.with_secret_access_key(aws_secret_access_key);
+            }
+            if let Some(aws_session_token) = profile_set.get("aws_session_token") {
+                s3_builder = s3_builder.with_token(aws_session_token);
+            }
+            if let Some(region) = profile_set.get("region") {
+                s3_builder = s3_builder.with_region(region);
+            }
         }
 
         let url = Url::parse(file.as_ref()).unwrap();
