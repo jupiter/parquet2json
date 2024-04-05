@@ -1,14 +1,17 @@
 [package]
 name = "parquet2json"
 description = "A command-line tool for streaming Parquet as line-delimited JSON"
-version = "3.0.0"
+version = "3.1.0"
 edition = "2021"
 license = "MIT"
 authors = ["Pieter Raubenheimer <pieter@wavana.com>"]
 repository = "https://github.com/jupiter/parquet2json"
 
 [dependencies]
+arrow-array = { version = "51.0.0" }
+arrow-cast = { version = "51.0.0" }
 arrow-json = { version = "51.0.0" }
+arrow-schema = { version = "51.0.0" }
 aws-config = { version = "1.1.8" }
 aws-types = { version = "1.1.8" }
 clap = { version = "4.5.4", features = ["derive"] }

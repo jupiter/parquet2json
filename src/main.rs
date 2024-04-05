@@ -1,10 +1,16 @@
 use std::ops::Add;
 use std::sync::Arc;
 
-use arrow_json::writer::LineDelimitedWriter;
+use arrow_array::{Array, RecordBatch};
+use arrow_cast::display::FormatOptions;
+use arrow_cast::{cast_with_options, CastOptions};
+use arrow_json::writer::LineDelimited;
+use arrow_json::WriterBuilder;
+use arrow_schema::{DataType, Field, SchemaBuilder};
 use aws_config::profile::load;
 use aws_config::profile::profile_file::ProfileFiles;
 use aws_types::os_shim_internal::{Env, Fs};
+use cast::cast_binary_to_string;
 use clap::{Parser, Subcommand};
 use object_store::aws::AmazonS3Builder;
 use object_store::http::HttpBuilder;
@@ -18,6 +24,8 @@ use parquet::schema::printer::print_schema;
 use tokio_stream::StreamExt;
 use url::Url;
 use urlencoding::decode;
+
+mod cast;
 
 #[derive(Parser, Clone)]
 #[clap(version, about, long_about = None)]
@@ -44,6 +52,10 @@ enum Commands {
         /// Select columns by name (comma,separated,?prefixed_optional)
         #[clap(short, long)]
         columns: Option<String>,
+
+        /// Outputs null values
+        #[clap(short, long)]
+        nulls: bool,
     },
 
     /// Outputs the Thrift schema
@@ -67,6 +79,7 @@ async fn output_for_command(mut reader: ParquetObjectReader, command: &Commands)
             offset,
             limit,
             columns,
+            nulls,
         } => {
             let absolute_offset: usize = if offset.is_negative() {
                 parquet_metadata
@@ -115,10 +128,73 @@ async fn output_for_command(mut reader: ParquetObjectReader, command: &Commands)
             }
 
             let mut iter = async_reader_builder.build().unwrap();
-            let mut json_writer = LineDelimitedWriter::new(std::io::stdout());
 
-            while let Some(Ok(batch)) = iter.next().await {
-                let _ = json_writer.write(&batch);
+            let builder = WriterBuilder::new().with_explicit_nulls(*nulls);
+            let mut json_writer = builder.build::<_, LineDelimited>(std::io::stdout());
+
+            while let Some(rbt) = iter.next().await {
+                match rbt {
+                    Ok(batch) => {
+                        let schema = batch.schema();
+                        let json_batch = if schema.fields.iter().any(|field| {
+                            matches!(
+                                field.data_type(),
+                                DataType::Binary
+                                    | DataType::Decimal128(_, _)
+                                    | DataType::Decimal256(_, _)
+                            )
+                        }) {
+                            let mut columns: Vec<Arc<dyn Array>> = vec![];
+                            let mut builder = SchemaBuilder::new();
+                            schema
+                                .fields
+                                .iter()
+                                .for_each(|field| match field.data_type() {
+                                    DataType::Binary => {
+                                        builder.push(Field::new(
+                                            field.name(),
+                                            DataType::Utf8,
+                                            field.is_nullable(),
+                                        ));
+                                        let column = batch.column_by_name(field.name()).unwrap();
+                                        let new_column =
+                                            cast_binary_to_string::<i32>(column).unwrap();
+                                        columns.push(new_column);
+                                    }
+                                    DataType::Decimal128(_, _) | DataType::Decimal256(_, _) => {
+                                        builder.push(Field::new(
+                                            field.name(),
+                                            DataType::Utf8,
+                                            field.is_nullable(),
+                                        ));
+                                        let column = batch.column_by_name(field.name()).unwrap();
+                                        let new_column = cast_with_options(
+                                            column,
+                                            &DataType::Utf8,
+                                            &CastOptions {
+                                                safe: false,
+                                                format_options: FormatOptions::default(),
+                                            },
+                                        )
+                                        .unwrap();
+                                        columns.push(new_column);
+                                    }
+                                    _ => {
+                                        builder.push(field.clone());
+                                        columns.push(
+                                            batch.column_by_name(field.name()).unwrap().clone(),
+                                        );
+                                    }
+                                });
+                            let schema = builder.finish();
+                            RecordBatch::try_new(schema.into(), columns).unwrap()
+                        } else {
+                            batch
+                        };
+                        json_writer.write(&json_batch).unwrap();
+                    }
+                    Err(e) => println!("{}", e),
+                };
             }
             json_writer.finish().unwrap();
         }

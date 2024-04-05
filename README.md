@@ -37,6 +37,7 @@ Options:
   -o, --offset <OFFSET>    Starts outputting from this row (first row: 0, last row: -1) [default: 0]
   -l, --limit <LIMIT>      Maximum number of rows to output
   -c, --columns <COLUMNS>  Select columns by name (comma,separated,?prefixed_optional)
+  -n, --nulls              Outputs null values
   -h, --help               Print help
 ```
 
@@ -59,11 +60,11 @@ $ parquet2json ./myfile.parquet cat > output.jsonl
 #### From S3 or HTTP (S3)
 
 ```shell
-$ parquet2json s3://noaa-ghcn-pds/parquet/by_year/YEAR=2024/ELEMENT=AWDR/83d5f1ef1edf4e3c838b15f56f07dc02_0.snappy.parquet cat
+$ parquet2json s3://overturemaps-us-west-2/release/2024-03-12-alpha.0/theme=base/type=land/part-00001-10ae8a61-702e-480f-9024-6dee4abd93df-c000.zstd.parquet cat
 ```
 
 ```shell
-$ parquet2json https://noaa-ghcn-pds.s3.amazonaws.com/parquet/by_year/YEAR%3D2024/ELEMENT%3DAWDR/83d5f1ef1edf4e3c838b15f56f07dc02_0.snappy.parquet cat
+$ parquet2json https://overturemaps-us-west-2.s3.us-west-2.amazonaws.com/release/2024-03-12-alpha.0/theme%3Dbase/type%3Dland/part-00001-10ae8a61-702e-480f-9024-6dee4abd93df-c000.zstd.parquet cat
 ```
 
 #### Filter selected columns with jq
