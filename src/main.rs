@@ -8,7 +8,7 @@ use arrow_json::writer::LineDelimited;
 use arrow_json::WriterBuilder;
 use arrow_schema::{DataType, Field, SchemaBuilder};
 use aws_config::profile::load;
-use aws_config::profile::profile_file::ProfileFiles;
+use aws_runtime::env_config::file::EnvConfigFiles;
 use aws_types::os_shim_internal::{Env, Fs};
 use cast::cast_binary_to_string;
 use clap::{Parser, Subcommand};
@@ -221,7 +221,7 @@ async fn main() {
         if let Ok(profile_set) = load(
             &Fs::default(),
             &Env::default(),
-            &ProfileFiles::default(),
+            &EnvConfigFiles::default(),
             None,
         )
         .await
