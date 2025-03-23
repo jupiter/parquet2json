@@ -8,7 +8,7 @@ authors = ["Pieter Raubenheimer <pieter@wavana.com>"]
 repository = "https://github.com/jupiter/parquet2json"
 
 [dependencies]
-arrow-array = { version = "52.0.0" }
+arrow-array = { version = "52.0.0", features = ["chrono-tz"] }
 arrow-cast = { version = "52.0.0" }
 arrow-json = { version = "52.0.0" }
 arrow-schema = { version = "52.0.0" }
