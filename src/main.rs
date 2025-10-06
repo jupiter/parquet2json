@@ -7,9 +7,7 @@ use arrow_cast::{cast_with_options, CastOptions};
 use arrow_json::writer::LineDelimited;
 use arrow_json::WriterBuilder;
 use arrow_schema::{DataType, Field, SchemaBuilder};
-use aws_config::profile::load;
-use aws_runtime::env_config::file::EnvConfigFiles;
-use aws_types::os_shim_internal::{Env, Fs};
+use aws_credential_types::provider::ProvideCredentials;
 use cast::cast_binary_to_string;
 use clap::{Parser, Subcommand};
 use object_store::aws::AmazonS3Builder;
@@ -216,28 +214,29 @@ async fn main() {
     let file = cli.file;
 
     if file.as_str().starts_with("s3://") {
-        let mut s3_builder: AmazonS3Builder = AmazonS3Builder::from_env();
+        // Start with from_env() for backwards compatibility with object_store env vars
+        let mut s3_builder = AmazonS3Builder::from_env();
 
-        if let Ok(profile_set) = load(
-            &Fs::default(),
-            &Env::default(),
-            &EnvConfigFiles::default(),
-            None,
-        )
-        .await
-        {
-            if let Some(aws_access_key_id) = profile_set.get("aws_access_key_id") {
-                s3_builder = s3_builder.with_access_key_id(aws_access_key_id);
-            }
-            if let Some(aws_secret_access_key) = profile_set.get("aws_secret_access_key") {
-                s3_builder = s3_builder.with_secret_access_key(aws_secret_access_key);
-            }
-            if let Some(aws_session_token) = profile_set.get("aws_session_token") {
-                s3_builder = s3_builder.with_token(aws_session_token);
-            }
-            if let Some(region) = profile_set.get("region") {
-                s3_builder = s3_builder.with_region(region);
-            }
+        // Use AWS SDK to load credentials (supports SSO, profiles, env vars, etc.)
+        // This avoids IMDS timeout issues on local machines
+        let aws_config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+        let credentials = aws_config
+            .credentials_provider()
+            .expect("No credentials provider available")
+            .provide_credentials()
+            .await
+            .expect("Failed to load AWS credentials");
+
+        s3_builder = s3_builder
+            .with_access_key_id(credentials.access_key_id())
+            .with_secret_access_key(credentials.secret_access_key());
+
+        if let Some(session_token) = credentials.session_token() {
+            s3_builder = s3_builder.with_token(session_token);
+        }
+
+        if let Some(region) = aws_config.region() {
+            s3_builder = s3_builder.with_region(region.as_ref());
         }
 
         let url = Url::parse(file.as_ref()).unwrap();
