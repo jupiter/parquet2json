@@ -189,12 +189,22 @@ async fn output_for_command(mut reader: ParquetObjectReader, command: &Commands)
                         } else {
                             batch
                         };
-                        json_writer.write(&json_batch).unwrap();
+                        if let Err(e) = json_writer.write(&json_batch) {
+                            if e.to_string().contains("Broken pipe") {
+                                std::process::exit(0);
+                            }
+                            panic!("Write error: {}", e);
+                        }
                     }
                     Err(e) => println!("{}", e),
                 };
             }
-            json_writer.finish().unwrap();
+            if let Err(e) = json_writer.finish() {
+                if e.to_string().contains("Broken pipe") {
+                    std::process::exit(0);
+                }
+                panic!("Finish error: {}", e);
+            }
         }
         Commands::Schema {} => {
             print_schema(
