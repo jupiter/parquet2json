@@ -1745,7 +1745,7 @@ dependencies = [
 
 [[package]]
 name = "parquet2json"
-version = "4.2.0"
+version = "4.3.0"
 dependencies = [
  "arrow-array",
  "arrow-cast",
