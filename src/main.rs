@@ -249,6 +249,12 @@ async fn main() {
             s3_builder = s3_builder.with_region(region.as_ref());
         }
 
+        if let Some(endpoint_url) = aws_config.endpoint_url() {
+            s3_builder = s3_builder
+                .with_endpoint(endpoint_url)
+                .with_virtual_hosted_style_request(false);
+        }
+
         let url = Url::parse(file.as_ref()).unwrap();
 
         let storage_container = Arc::new(
