@@ -41,12 +41,6 @@ Options:
   -h, --help               Print help
 ```
 
-### S3 Settings
-
-Credentials are provided as per standard AWS toolchain, i.e. per environment variables (`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`), AWS credentials file or IAM ECS container/instance profile.
-
-The default AWS region must be set per environment variable (`AWS_DEFAULT_REGION`) in AWS credentials file and must match region of the object's bucket.
-
 ### Examples
 
 Use it to stream output to files and other tools such as `grep` and [jq](https://stedolan.github.io/jq/).
@@ -57,20 +51,43 @@ Use it to stream output to files and other tools such as `grep` and [jq](https:/
 $ parquet2json ./myfile.parquet cat > output.jsonl
 ```
 
-#### From S3 or HTTP (S3)
+#### From S3 or HTTP
 
 ```shell
-$ parquet2json s3://overturemaps-us-west-2/release/2024-03-12-alpha.0/theme=base/type=land/part-00001-10ae8a61-702e-480f-9024-6dee4abd93df-c000.zstd.parquet cat
+$ parquet2json s3://your-bucket/your-file.parquet cat
 ```
 
 ```shell
-$ parquet2json https://overturemaps-us-west-2.s3.us-west-2.amazonaws.com/release/2024-03-12-alpha.0/theme%3Dbase/type%3Dland/part-00001-10ae8a61-702e-480f-9024-6dee4abd93df-c000.zstd.parquet cat
+$ parquet2json https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet rowcount
 ```
 
 #### Filter selected columns with jq
 
 ```shell
 $ parquet2json ./myfile.pq cat --columns=url,level | jq 'select(.level==3) | .url'
+```
+
+### S3 Settings
+
+Credentials are provided as per standard AWS toolchain, i.e. per environment variables (`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`), AWS credentials file or IAM ECS container/instance profile.
+
+The default AWS region must be set per environment variable (`AWS_DEFAULT_REGION`) in AWS credentials file and must match region of the object's bucket.
+
+#### S3-compatible endpoints (e.g. Cloudflare R2)
+
+Custom S3-compatible endpoints are supported via the `endpoint_url` key in an AWS profile or the `AWS_ENDPOINT_URL` environment variable. For example, to use Cloudflare R2, add `endpoint_url` to your profile in `~/.aws/config`:
+
+```ini
+[profile r2]
+aws_access_key_id = <R2_ACCESS_KEY_ID>
+aws_secret_access_key = <R2_SECRET_ACCESS_KEY>
+endpoint_url = https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+```
+
+Then read from R2 using that profile:
+
+```shell
+$ AWS_PROFILE=r2 parquet2json s3://mybucket/myfile.parquet cat
 ```
 
 ## License

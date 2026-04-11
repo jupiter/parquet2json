@@ -17,3 +17,17 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Format
         run: cargo fmt -- --check
+
+  integration-test:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+      - name: Build
+        run: cargo build --release
+      - name: Integration test
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: ./scripts/integration_test.sh
